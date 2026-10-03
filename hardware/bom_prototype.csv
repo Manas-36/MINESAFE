@@ -1,0 +1,22 @@
+Subsystem,Component,Unit price (INR),Qty per unit,Units,Total (INR),Status
+Body unit,ESP32-S3 N16R8 dev board,750,1,1,750,Have
+Body unit,MPU6050 (GY-521 / HW-123),150,1,1,150,Have
+Body unit,BMP180 (GY-68),120,1,1,120,Have
+Body unit,DS18B20 waterproof probe,120,1,1,120,Have
+Body unit,MAX30100/30102 pulse oximeter,150,1,1,150,Have
+Body unit,HW-827 pulse sensor,150,1,1,150,Optional
+Body unit,LiPo 1000 mAh + charger,350,1,1,350,To buy
+Body unit,"Button, LED, resistors, strap",250,1,1,250,Have
+Repeater,ESP32-S3 / XIAO ESP32-C6,700,1,2,1400,Have
+Repeater,MQ gas sensor module,150,1,2,300,Have
+Repeater,Buzzer + resistors,40,1,2,80,Have
+Repeater,5 V power bank,300,1,2,600,To buy
+Repeater,Enclosure,150,1,2,300,To buy
+Repeater,u.FL to SMA pigtail,150,1,1,150,Optional
+Entry station,Seeed XIAO ESP32-C6,700,1,1,700,Have
+Entry station,RFID reader (PN532 / RC522),300,1,1,300,Have
+Entry station,NTAG215 tags,40,4,1,160,Have
+Entry station,OLED display + buttons,260,1,1,260,To buy
+Control room,"Wires, breadboards, misc",500,1,1,500,Have
+Control room,Laptop + phone (own),0,1,1,0,Have
+,TOTAL,,,,6790,
