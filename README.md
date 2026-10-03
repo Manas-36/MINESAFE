@@ -3,6 +3,8 @@
 **Intelligent Safety Gear Compliance, Health Monitoring and Navigation System for Miners**
 Capstone project · B.E. Mechatronics · Thakur College of Engineering and Technology (TCET), Mumbai · 2026–27
 
+[![Progress](https://img.shields.io/badge/progress-66%25-F2A900?style=flat-square)](ROADMAP.md) [![Week](https://img.shields.io/badge/now-week_9_of_14-1f6feb?style=flat-square)](ROADMAP.md) [![Version](https://img.shields.io/badge/version-v1.0-2ea44f?style=flat-square)](CHANGELOG.md) ![ESP32](https://img.shields.io/badge/ESP32-ESP--NOW-E7352C?style=flat-square&logo=espressif&logoColor=white) ![Python](https://img.shields.io/badge/hub-Flask-3776AB?style=flat-square&logo=python&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)](LICENSE)
+
 MineSafe checks a miner's safety kit at the gate, watches their health and movement underground, shows where they are on a tunnel map, and lets the control room warn everyone in seconds — **without GPS, internet or cabling**.
 
 ![Control room map](docs/images/map.png)
@@ -51,6 +53,8 @@ Raw double integration of acceleration drifts by ~175 m in a minute, so MineSafe
 
 ## Progress
 
+**35 / 53 tasks done · Week 9 of 14** `████████████████████░░░░░░░░░░` → full week-by-week plan, Gantt chart and checklist in **[ROADMAP.md](ROADMAP.md)**
+
 | Version | Milestone | Status |
 |---|---|---|
 | v0.0 | Research, competitive analysis, architecture, pilot BOM | ✅ |
@@ -87,6 +91,7 @@ docs/
   presentation/       slide outline (add the exported PDF here)
   images/             screenshots
 CHANGELOG.md          version-by-version progress
+ROADMAP.md            week-by-week plan and to-do list
 ```
 
 ## Quick start
