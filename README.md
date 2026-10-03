@@ -62,7 +62,7 @@ Raw double integration of acceleration drifts by ~175 m in a minute, so MineSafe
 | v0.6 | Tunnel map + GPS-free tracking, gas analysis, real body sensors | ✅ software · 🔧 sensor bench test next |
 | v1.0 | Structured repo, docs, presentation, Notion | ✅ |
 
-Every version is a git tag — see [CHANGELOG.md](CHANGELOG.md) for what changed and [docs/decisions.md](docs/decisions.md) for why.
+Every version has its own branch (`version/v0.0` … `version/v1.0`) — see [CHANGELOG.md](CHANGELOG.md) for what changed and [docs/decisions.md](docs/decisions.md) for why.
 
 ## Repository layout
 

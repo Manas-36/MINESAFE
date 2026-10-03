@@ -1,6 +1,6 @@
 # Changelog and progress
 
-Each version is a tagged commit (`git checkout v0.3` to see the project at that stage). The history was assembled on 3 Oct 2026 from the files saved during development; dates are approximate.
+Each version is one commit on `main` and has its own branch, `version/v0.0` … `version/v1.0` — pick it from the branch menu on GitHub (or `git checkout version/v0.3`) to see the project at that stage. The history was assembled on 3 Oct 2026 from the files saved during development; dates are approximate.
 
 | Version | When | Milestone |
 |---|---|---|
