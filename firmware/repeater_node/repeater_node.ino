@@ -1,8 +1,9 @@
 // =====================================================================
 //  Miner Safety System - REPEATER NODE (chain / mesh) - ESP-NOW version
-//  Boards: ESP32-S3 or ESP32-C6 (any mix), Arduino ESP32 core 3.x
-//          Tools -> Board: "ESP32S3 Dev Module" or "ESP32C6 Dev Module"
-//          Tools -> USB CDC On Boot: Enabled
+//  Board : ESP32-S3 (N16R8 module), Arduino ESP32 core 3.x
+//          Tools -> Board: "ESP32S3 Dev Module", Flash Size: 16MB, PSRAM: OPI PSRAM
+//          Tools -> USB CDC On Boot: Enabled (cable in the "USB" port)
+//                                    Disabled (cable in the "COM"/"UART" port)
 //
 //  EVERYTHING TALKS ESP-NOW (direct ESP-to-ESP radio, no router needed)
 //    Body units  -> repeaters     : body packets (ID + serial number + readings)
@@ -29,19 +30,12 @@
 //    The fake worker's packets go through the repeater exactly like a real body's,
 //    so the admin page shows them (tagged PHONE TEST) with the route they took.
 //
-//  WIRING (pins are picked automatically for S3 / C6 - see PIN SETUP below)
-//                      ESP32-S3      ESP32-C6    (Seeed XIAO ESP32-C6 pin label)
-//    Buzzer (+)        GPIO5         GPIO18 (D10) buzzer(-) -> GND  (active 3.3 V buzzer;
-//                                                use an NPN transistor for a louder 5 V one)
-//    Status LED        GPIO6         GPIO19 (D8) -> 220 ohm -> LED -> GND (optional)
-//    Gas sensor AO     GPIO4         GPIO2  (D2) through a divider: AO -> 10k -> pin,
-//                                                pin -> 20k -> GND. Sensor VCC -> 5V, GND -> GND.
+//  Also works on a Seeed XIAO ESP32-C6 (Tools -> Board: "XIAO_ESP32C6"), built-in antenna.
 //
-//  GAS
-//    MQ-2 / MQ-4 / MQ-7 module. Heater warm-up 60 s. Reading sent to the admin in
-//    mV; the admin page sets the alarm level and alerts everyone automatically.
-//    No sensor connected -> reported as "no sensor" (that is fine for testing).
-//    Fail-safe: above GAS_LOCAL_ALARM_MV this repeater beeps fast by itself.
+//  WIRING
+//    Buzzer (+)  -> GPIO5 on the ESP32-S3,  D10 on the XIAO ESP32-C6      Buzzer (-) -> GND
+//    (active 3.3 V buzzer; for a loud 5 V buzzer use an NPN transistor, 1k to the base)
+//    Do not use GPIO35, 36, 37 on the N16R8 - they belong to the PSRAM.
 //
 //  SETUP FOR EACH BOARD
 //    Main repeater (near the admin laptop):  IS_GATEWAY 1, REPEATER_NO 1
@@ -59,29 +53,24 @@
 #define IS_GATEWAY    1                 // 1 = main repeater (WiFi to admin). 0 = repeater in the tunnel
 const uint8_t REPEATER_NO = 1;          // unique number 1..99  -> shown as REP-01, REP-02 ...
 
-const char* WIFI_SSID = "YOUR_HOTSPOT";   // only used by the main repeater
+const char* WIFI_SSID = "YOUR_HOTSPOT";       // only used by the main repeater
 const char* WIFI_PASS = "YOUR_PASSWORD";
 const char* HUB_URL   = "http://192.168.1.100:5000/api/telemetry";   // laptop IP running admin_hub.py
+#define HUB_AUTOFIND  1   // 1 = if the laptop's IP changes, search the hotspot network for admin_hub (port 5000) by itself
 
 #define TEST_PAGE     1                 // 1 = serve the phone test page, 0 = off
-#define USE_EXTERNAL_ANTENNA 0          // Seeed XIAO ESP32-C6 only: 1 = use the u.FL antenna socket
-                                        // (fit the antenna first!), 0 = built-in antenna
 const char* TEST_AP_PASS = "minesafe";  // password of the tunnel repeaters' test WiFi (8+ chars)
 
-// ---- PIN SETUP (chosen automatically from the board you select in Tools) ----
 #if CONFIG_IDF_TARGET_ESP32C6
-  #define BUZZER_PIN  18
-  #define LED_PIN     19
-  #define GAS_PIN     2
-#else                                   // ESP32-S3 (and others)
-  #define BUZZER_PIN  5
-  #define LED_PIN     6
-  #define GAS_PIN     4
+  #define BUZZER_PIN     18             // Seeed XIAO ESP32-C6: pin D10
+#else
+  #define BUZZER_PIN     5              // ESP32-S3 N16R8: GPIO5
 #endif
-#define GAS_DIVIDER        1.5f         // 10k + 20k divider: sensor mV = pin mV x 1.5
-#define GAS_WARMUP_MS      60000
-#define GAS_LOCAL_ALARM_MV 2500
-#define GAS_EVENT_STEP_MV  300
+// BUZZER TYPE - if you hear nothing (or only a tiny click), change these:
+#define BUZZER_PASSIVE   0    // 0 = ACTIVE buzzer (beeps by itself on DC, usually has a sticker / sealed bottom)
+                              // 1 = PASSIVE buzzer (open bottom / green board; needs a tone - only clicks on DC)
+#define BUZZER_ACTIVE_LOW 0   // 1 = 3-pin buzzer MODULE that beeps when the I/O pin is LOW (many "low level trigger" modules)
+#define BUZZER_FREQ      2700 // tone for a passive buzzer, Hz
 
 #define BEACON_MS        1000
 #define STATUS_MS        5000
@@ -134,7 +123,7 @@ struct __attribute__((packed)) MsStatus {
   uint16_t bodies;
   uint8_t  neighbors;
   uint16_t gasMv;
-  uint8_t  gasFlags;      // bit0 warming up, bit1 local alarm, bit2 sensor missing
+  uint8_t  gasFlags;      // gas fields reserved for later (no gas sensor fitted now)
 };
 struct __attribute__((packed)) MsUpHdr {
   char     magic[2];
@@ -197,12 +186,10 @@ uint32_t alertId = 0;
 uint8_t  alertLevel = 0;
 char     alertTarget[11] = "*";
 bool     beaconNow = false;
-uint32_t bodiesHeard = 0, ledOffAt = 0, lastBeaconHeard = 0, lastHop = 0;
+uint32_t bodiesHeard = 0, lastBeaconHeard = 0, lastHop = 0;
 uint32_t lastHubOk = 0, hubPosts = 0, hubErrors = 0;
 int      lastHubCode = 0;
 uint16_t statusSeq = 0;
-uint16_t gasMv = 0;
-uint8_t  gasFlags = 1;
 bool     statusNow = false;
 Neighbor nbr[16];
 uint32_t seenHash[64];
@@ -226,27 +213,6 @@ void copyTelem(MsTelem& t, const uint8_t* data, int len) {
   memset(&t, 0, sizeof(t));
   t.hum = 0xFFFF;
   memcpy(&t, data, len < (int)sizeof(MsTelem) ? len : sizeof(MsTelem));
-}
-
-// ------------------------- gas ---------------------------------------
-void readGas(uint32_t now) {
-  static uint32_t last = 0;
-  static uint16_t lastReported = 0;
-  if (now - last < 500) return;
-  last = now;
-  uint32_t sum = 0;
-  for (int i = 0; i < 16; i++) sum += analogReadMilliVolts(GAS_PIN);
-  gasMv = (uint16_t)(sum / 16 * GAS_DIVIDER);
-  uint8_t f = 0;
-  if (now < GAS_WARMUP_MS) f |= 1;
-  if (gasMv < 30) f |= 4;                                   // ~0 V: sensor not connected
-  if (!(f & 5) && gasMv >= GAS_LOCAL_ALARM_MV) f |= 2;
-  if ((f & 2) != (gasFlags & 2) || (!(f & 1) && gasMv > lastReported + GAS_EVENT_STEP_MV)) {
-    statusNow = true;
-    lastReported = gasMv;
-  }
-  if (gasMv + GAS_EVENT_STEP_MV < lastReported) lastReported = gasMv;
-  gasFlags = f;
 }
 
 // ------------------------- routing -----------------------------------
@@ -335,10 +301,9 @@ void queueStatusForHub(const MsStatus& st, const uint8_t* path, uint8_t pathLen)
   char js[340];
   snprintf(js, sizeof(js),
            "{\"id\":\"%s\",\"hop\":%u,\"parent\":\"%s\",\"prssi\":%d,\"alert_id\":%lu,\"buzzing\":%s,"
-           "\"up\":%lu,\"bodies\":%u,\"nbrs\":%u,\"gas_mv\":%u,\"gas_warm\":%s,\"gas_alarm\":%s,\"gas_missing\":%s,\"path\":",
+           "\"up\":%lu,\"bodies\":%u,\"nbrs\":%u,\"path\":",
            repName(st.rep).c_str(), st.hop, st.parent ? repName(st.parent).c_str() : "", st.parentRssi,
-           (unsigned long)st.alertId, st.buzzing ? "true" : "false", (unsigned long)st.uptime, st.bodies, st.neighbors,
-           st.gasMv, st.gasFlags & 1 ? "true" : "false", st.gasFlags & 2 ? "true" : "false", st.gasFlags & 4 ? "true" : "false");
+           (unsigned long)st.alertId, st.buzzing ? "true" : "false", (unsigned long)st.uptime, st.bodies, st.neighbors);
   String s = String(js) + pathJson(path, pathLen) + "}";
   for (int i = 0; i < nStatuses; i++)                         // keep only the newest per repeater
     if (hubStatuses[i].indexOf("\"id\":\"" + repName(st.rep) + "\"") >= 0) { hubStatuses[i] = s; return; }
@@ -391,7 +356,6 @@ MsStatus myStatus() {
   st.rep = REPEATER_NO; st.hop = myHop; st.parent = parent; st.parentRssi = parentRssi;
   st.alertId = alertId; st.buzzing = alertLevel; st.uptime = millis() / 1000;
   st.statusSeq = ++statusSeq; st.bodies = bodiesHeard; st.neighbors = neighborCount(millis());
-  st.gasMv = gasMv; st.gasFlags = gasFlags;
   return st;
 }
 
@@ -399,8 +363,6 @@ MsStatus myStatus() {
 void processBody(const MsTelem& t, int8_t rssi) {
   if (alreadySeen(fnv((const uint8_t*)&t, sizeof(MsTelem)))) return;
   bodiesHeard++;
-  digitalWrite(LED_PIN, HIGH);
-  ledOffAt = millis() + 30;
   uint8_t path[1] = {REPEATER_NO};
   if (IS_GATEWAY) queueTelemetryForHub(t, rssi, path, 1);
   else if (myHop != 255) sendUp(UP_TELEM, &t, sizeof(MsTelem), rssi, path, 1);
@@ -451,8 +413,37 @@ String jsonStr(const String& s, const char* key) {
   return (k < 0 || e < 0) ? "" : s.substring(k + 1, e);
 }
 
+// ---- hub auto-find: the phone hotspot gives the laptop a new IP now and then ----
+String   hubUrl;                 // the URL in use (starts as HUB_URL)
+uint8_t  hubFailRun = 0;         // failed posts in a row
+int      findStep = -1;          // -1 = not searching, else index of the next address to try
+uint16_t hubPort() { int a = hubUrl.indexOf(':', 7), b = hubUrl.indexOf('/', 7); return a > 0 ? hubUrl.substring(a + 1, b).toInt() : 80; }
+String   hubPath() { int b = hubUrl.indexOf('/', 7); return b > 0 ? hubUrl.substring(b) : "/"; }
+uint8_t  hubLastOctet() { int b = hubUrl.indexOf(':', 7); String h = hubUrl.substring(7, b); return h.substring(h.lastIndexOf('.') + 1).toInt(); }
+
+// one address per call, so ESP-NOW keeps running while it searches (~30 s for a whole /24 network)
+void hubFindStep() {
+  if (findStep < 0 || WiFi.status() != WL_CONNECTED) return;
+  IPAddress me = WiFi.localIP();
+  uint8_t first = hubLastOctet();
+  int host = findStep == 0 ? first : findStep;               // try the old last number first (it usually stays)
+  findStep++;
+  if (findStep > 254) { findStep = 0; Serial.println("Hub not found on this network - searching again (is admin_hub.py running? firewall?)"); }
+  if (host == 0 || (findStep > 1 && host == first) || host == me[3] || host == 255) return;
+  IPAddress ip(me[0], me[1], me[2], host);
+  NetworkClient c;
+  if (c.connect(ip, hubPort(), 120)) {
+    c.stop();
+    hubUrl = "http://" + ip.toString() + ":" + String(hubPort()) + hubPath();
+    Serial.printf("Found something on port %u at %s -> using hub %s\n", hubPort(), ip.toString().c_str(), hubUrl.c_str());
+    findStep = -1; hubFailRun = 0;
+  }
+}
+
 void postToHub() {
   if (WiFi.status() != WL_CONNECTED) return;
+  if (hubUrl.length() == 0) hubUrl = HUB_URL;
+  if (findStep >= 0) return;                                  // searching for the laptop
   MsStatus me = myStatus();
   uint8_t mePath[1] = {REPEATER_NO};
   queueStatusForHub(me, mePath, 1);
@@ -469,7 +460,7 @@ void postToHub() {
 
   HTTPClient http;
   http.setTimeout(1500);
-  http.begin(HUB_URL);
+  http.begin(hubUrl);
   http.addHeader("Content-Type", "application/json");
   int code = http.POST(body);
   String resp = code == 200 ? http.getString() : "";
@@ -478,9 +469,17 @@ void postToHub() {
   lastHubCode = code;
   if (code != 200) {
     hubErrors++;
-    Serial.printf("hub error %d (is admin_hub.py running? is HUB_URL the laptop's IP?)\n", code);
+    Serial.printf("hub error %d at %s (is admin_hub.py running? is it the laptop's IP?)\n", code, hubUrl.c_str());
+#if HUB_AUTOFIND
+    if (++hubFailRun >= 3 && code < 0) {                      // no answer at all: the laptop probably got a new IP
+      Serial.printf("Searching %u.%u.%u.x for admin_hub on port %u ...\n", WiFi.localIP()[0], WiFi.localIP()[1],
+                    WiFi.localIP()[2], hubPort());
+      findStep = 0;
+    }
+#endif
     return;
   }
+  hubFailRun = 0;
   lastHubOk = millis();
   nPackets = 0; nStatuses = 0;
   int a = resp.indexOf("\"alert\"");
@@ -523,7 +522,6 @@ const char TEST_HTML[] =
   " <div class=\"row\"><span>Route to admin</span><b id=\"route\">-</b></div>\n"
   " <div class=\"row\"><span>Admin link</span><b id=\"hub\">-</b></div>\n"
   " <div class=\"row\"><span>Radio channel</span><b id=\"ch\">-</b></div>\n"
-  " <div class=\"row\"><span>Gas sensor</span><b id=\"gas\">-</b></div>\n"
   "</div>\n"
   "<div class=\"card\">\n"
   " <b>Fake worker (this phone acts as a body unit)</b>\n"
@@ -556,7 +554,6 @@ const char TEST_HTML[] =
   "  $('#hub').innerHTML='<b class=\"'+(ok?'ok':'bad')+'\">'+(ok?'OK, last post '+ago(d.hub_age):'NOT reaching admin (code '+d.hub_code+')')+'</b>';}\n"
   " else $('#hub').innerHTML='<b class=\"warn\">through '+(d.parent||'?')+'</b>';\n"
   " $('#ch').textContent=d.ch;\n"
-  " $('#gas').textContent=d.gas_missing?'not connected':(d.gas_mv+' mV'+(d.gas_warm?' (warming up)':''));\n"
   " if(d.sent!==undefined)$('#sent').textContent=d.sent;\n"
   " $('#led').className='led'+(d.led?' on':'');$('#ledt').textContent=d.led?'ALERT - LED ON':'Alert LED off';\n"
   "}\n"
@@ -576,9 +573,9 @@ String statusJson(const String& id) {
   int32_t hubAge = lastHubOk ? (int32_t)(millis() - lastHubOk) : -1;
   snprintf(js, sizeof(js),
            "{\"rep\":\"%s\",\"gateway\":%s,\"hop\":%u,\"parent\":\"%s\",\"ch\":%u,\"hub_age\":%ld,\"hub_code\":%d,"
-           "\"gas_mv\":%u,\"gas_warm\":%s,\"gas_missing\":%s,\"led\":%s,\"sent\":%lu}",
+           "\"led\":%s,\"sent\":%lu}",
            repName(REPEATER_NO).c_str(), IS_GATEWAY ? "true" : "false", myHop, parent ? repName(parent).c_str() : "",
-           channel, (long)hubAge, lastHubCode, gasMv, gasFlags & 1 ? "true" : "false", gasFlags & 4 ? "true" : "false",
+           channel, (long)hubAge, lastHubCode,
            alertFor(id) ? "true" : "false", (unsigned long)fakeSent);
   return js;
 }
@@ -662,9 +659,9 @@ void wifiDiagnose() {
     bool mine = WiFi.SSID(i) == WIFI_SSID;
     found |= mine;
     Serial.printf("  %s \"%s\"  signal %d dBm  channel %d\n", mine ? ">>" : "  ",
-                  WiFi.SSID(i).c_str(), WiFi.RSSI(i), WiFi.channel(i));
+                  WiFi.SSID(i).c_str(), (int)WiFi.RSSI(i), (int)WiFi.channel(i));
   }
-  if (n == 0) Serial.println("  (no networks at all - antenna problem: check USE_EXTERNAL_ANTENNA)");
+  if (n == 0) Serial.println("  (no networks at all - keep the board away from metal and retry)");
   Serial.printf("  %d network(s) found\n", n < 0 ? 0 : n);
   if (found) Serial.printf("\"%s\" IS visible -> the password is wrong, or the hotspot blocks new devices / uses WPA3-only\n", WIFI_SSID);
   else Serial.printf("\"%s\" NOT visible -> hotspot off, set to 5 GHz, or the name differs (capitals/spaces)\n", WIFI_SSID);
@@ -699,24 +696,45 @@ void wifiWatch() {
   was = up;
 }
 
+// ------------------------- buzzer ------------------------------------
+bool buzzerIsOn = false;
+void buzzerBegin() {
+#if BUZZER_PASSIVE
+  ledcAttach(BUZZER_PIN, BUZZER_FREQ, 8);
+  ledcWriteTone(BUZZER_PIN, 0);
+#else
+  pinMode(BUZZER_PIN, OUTPUT);
+  digitalWrite(BUZZER_PIN, BUZZER_ACTIVE_LOW ? HIGH : LOW);
+#endif
+}
+void buzzerSet(bool on) {
+  if (on == buzzerIsOn) return;
+  buzzerIsOn = on;
+#if BUZZER_PASSIVE
+  ledcWriteTone(BUZZER_PIN, on ? BUZZER_FREQ : 0);
+#else
+  digitalWrite(BUZZER_PIN, (on != (bool)BUZZER_ACTIVE_LOW) ? HIGH : LOW);
+#endif
+}
+void beep(uint16_t ms) { buzzerSet(true); delay(ms); buzzerSet(false); }
+
 // ------------------------- setup / loop ------------------------------
 void setup() {
 #if defined(ARDUINO_XIAO_ESP32C6)
-  // XIAO ESP32-C6 has an RF switch in front of the antenna: GPIO3 LOW turns it on,
-  // GPIO14 picks the antenna (LOW = built-in, HIGH = u.FL socket). Older ESP32 board
-  // packages don't set this, and then the board hears almost nothing.
+  // XIAO ESP32-C6 RF switch (Seeed wiki): GPIO3 LOW enables it, GPIO14 LOW = built-in ceramic antenna.
+  // Set here as well, because older ESP32 board packages don't do it at start-up.
   pinMode(3, OUTPUT);
   digitalWrite(3, LOW);
   delay(100);
   pinMode(14, OUTPUT);
-  digitalWrite(14, USE_EXTERNAL_ANTENNA ? HIGH : LOW);
+  digitalWrite(14, LOW);
 #endif
   Serial.begin(115200);
   delay(1000);
-  pinMode(BUZZER_PIN, OUTPUT);
-  pinMode(LED_PIN, OUTPUT);
-  analogSetPinAttenuation(GAS_PIN, ADC_11db);
-  digitalWrite(BUZZER_PIN, HIGH); delay(150); digitalWrite(BUZZER_PIN, LOW);   // buzzer test
+  buzzerBegin();
+  Serial.printf("Buzzer test on GPIO%d (%s%s): 3 beeps\n", BUZZER_PIN, BUZZER_PASSIVE ? "passive, tone" : "active",
+                BUZZER_ACTIVE_LOW ? ", active-LOW" : "");
+  for (int i = 0; i < 3; i++) { beep(150); delay(150); }
 
   if (IS_GATEWAY) {
     WiFi.mode(WIFI_STA);
@@ -736,8 +754,7 @@ void setup() {
     Serial.printf("\n%s tunnel repeater - looking for the chain\n", repName(REPEATER_NO).c_str());
   }
   esp_wifi_set_ps(WIFI_PS_NONE);          // keep the receiver awake
-  Serial.printf("ESP-NOW %s   buzzer GPIO%d  LED GPIO%d  gas GPIO%d\n", radioBegin() ? "OK" : "FAILED",
-                BUZZER_PIN, LED_PIN, GAS_PIN);
+  Serial.printf("ESP-NOW %s   buzzer GPIO%d\n", radioBegin() ? "OK" : "FAILED", BUZZER_PIN);
 #if TEST_PAGE
   testPageBegin();
   if (IS_GATEWAY && WiFi.status() == WL_CONNECTED)
@@ -752,8 +769,6 @@ void loop() {
 
   handleRadio(now);
   channelSearch(now);
-  readGas(now);
-  if (ledOffAt && now > ledOffAt) { digitalWrite(LED_PIN, LOW); ledOffAt = 0; }
   if (now - lastRoute > 1000) { lastRoute = now; recomputeRoute(now); }
 
   bool routed = IS_GATEWAY || myHop != 255;
@@ -779,13 +794,20 @@ void loop() {
     }
     postToHub();
   }
+  if (IS_GATEWAY) hubFindStep();
 #if TEST_PAGE
   testApUpdate();
   web.handleClient();
 #endif
 
-  // buzzer: 300/200 ms while the alert is active; fast 100/100 if this repeater's own gas is high
-  bool buzz = (alertLevel && (now % 500) < 300) || ((gasFlags & 2) && (now % 200) < 100);
-  digitalWrite(BUZZER_PIN, buzz ? HIGH : LOW);
+  // Serial Monitor: type  b  + Enter = 1 second buzzer test (checks wiring without the admin)
+  static uint32_t testUntil = 0;
+  while (Serial.available()) {
+    char c = Serial.read();
+    if (c == 'b' || c == 'B') { testUntil = now + 1000; Serial.println("Buzzer test 1 s"); }
+  }
+  // buzzer: 300 ms on / 200 ms off while the alert is active
+  bool buzz = (alertLevel && (now % 500) < 300) || now < testUntil;
+  buzzerSet(buzz);
   delay(2);
 }
