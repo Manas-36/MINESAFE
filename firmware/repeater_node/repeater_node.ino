@@ -35,6 +35,11 @@
 //  WIRING
 //    Buzzer (+)  -> GPIO5 on the ESP32-S3,  D10 on the XIAO ESP32-C6      Buzzer (-) -> GND
 //    (active 3.3 V buzzer; for a loud 5 V buzzer use an NPN transistor, 1k to the base)
+//    Gas sensor (MQ module, e.g. "Flying-Fish MQ Sensor" board):
+//      VCC -> 5V (VBUS)   GND -> GND   DO -> not used
+//      AO  -> 10k resistor -> GPIO4 (S3) / D2 (XIAO C6),  and that pin -> 20k resistor -> GND
+//      (the divider keeps the 0-5 V sensor output safe for the 3.3 V ESP32 pin)
+//    No gas sensor yet? Leave it out - the admin page shows "not connected".
 //    Do not use GPIO35, 36, 37 on the N16R8 - they belong to the PSRAM.
 //
 //  SETUP FOR EACH BOARD
@@ -53,13 +58,20 @@
 #define IS_GATEWAY    1                 // 1 = main repeater (WiFi to admin). 0 = repeater in the tunnel
 const uint8_t REPEATER_NO = 1;          // unique number 1..99  -> shown as REP-01, REP-02 ...
 
-const char* WIFI_SSID = "YOUR_HOTSPOT";       // only used by the main repeater
+// Your hotspot and laptop: copy secrets.example.h to secrets.h and fill it in
+// (secrets.h is not uploaded to GitHub). Without it these placeholders are used.
+#if __has_include("secrets.h")
+  #include "secrets.h"
+#else
+const char* WIFI_SSID = "YOUR_HOTSPOT";   // only used by the main repeater
 const char* WIFI_PASS = "YOUR_PASSWORD";
 const char* HUB_URL   = "http://192.168.1.100:5000/api/telemetry";   // laptop IP running admin_hub.py
+#endif
 #define HUB_AUTOFIND  1   // 1 = if the laptop's IP changes, search the hotspot network for admin_hub (port 5000) by itself
 
 #define TEST_PAGE     1                 // 1 = serve the phone test page, 0 = off
 const char* TEST_AP_PASS = "minesafe";  // password of the tunnel repeaters' test WiFi (8+ chars)
+#define USE_EXTERNAL_ANTENNA 0          // XIAO ESP32-C6 only: 1 = antenna on the u.FL socket (fit it first!)
 
 #if CONFIG_IDF_TARGET_ESP32C6
   #define BUZZER_PIN     18             // Seeed XIAO ESP32-C6: pin D10
@@ -71,6 +83,18 @@ const char* TEST_AP_PASS = "minesafe";  // password of the tunnel repeaters' tes
                               // 1 = PASSIVE buzzer (open bottom / green board; needs a tone - only clicks on DC)
 #define BUZZER_ACTIVE_LOW 0   // 1 = 3-pin buzzer MODULE that beeps when the I/O pin is LOW (many "low level trigger" modules)
 #define BUZZER_FREQ      2700 // tone for a passive buzzer, Hz
+
+#define GAS_ENABLED      1    // 1 = read an MQ gas sensor (admin page works out the gases), 0 = no gas sensor
+#if CONFIG_IDF_TARGET_ESP32C6
+  #define GAS_PIN        2    // XIAO ESP32-C6: D2
+#else
+  #define GAS_PIN        4    // ESP32-S3: GPIO4
+#endif
+#define GAS_DIVIDER        1.5f         // 10k + 20k divider: sensor mV = pin mV x 1.5
+#define GAS_WARMUP_MS      60000        // MQ heater needs ~1 min before readings mean anything
+#define GAS_LOCAL_RISE_MV  1000         // fail-safe: beeps fast by itself when the reading rises this much
+                                        // above its own clean-air level (learned after warm-up)
+#define GAS_EVENT_STEP_MV  300          // tunnel repeaters report at once when gas rises this much
 
 #define BEACON_MS        1000
 #define STATUS_MS        5000
@@ -104,6 +128,11 @@ struct __attribute__((packed)) MsTelem {        // body -> repeaters
   uint8_t  nearRep;
   int8_t   nearRssi;
   uint16_t hum;           // 0.01 % RH (0xFFFF = none)
+  uint16_t steps;         // step counter since power-on (for the map)
+  int16_t  head;          // heading from the gyro, 0.1 deg, 0 = direction at power-on (0x7FFF = none)
+  int16_t  alt;           // height from the pressure sensor, dm, relative to power-on (0x7FFF = none)
+  uint8_t  hr;            // heart rate, beats per minute (0 = none)
+  uint8_t  spo2;          // blood oxygen %, estimate (0 = none)
 };
 struct __attribute__((packed)) MsBeacon {       // repeater -> everyone, every second
   char     magic[2];
@@ -123,7 +152,7 @@ struct __attribute__((packed)) MsStatus {
   uint16_t bodies;
   uint8_t  neighbors;
   uint16_t gasMv;
-  uint8_t  gasFlags;      // gas fields reserved for later (no gas sensor fitted now)
+  uint8_t  gasFlags;      // bit0 warming up, bit1 local alarm, bit2 sensor missing
 };
 struct __attribute__((packed)) MsUpHdr {
   char     magic[2];
@@ -190,6 +219,8 @@ uint32_t bodiesHeard = 0, lastBeaconHeard = 0, lastHop = 0;
 uint32_t lastHubOk = 0, hubPosts = 0, hubErrors = 0;
 int      lastHubCode = 0;
 uint16_t statusSeq = 0;
+uint16_t gasMv = 0;
+uint8_t  gasFlags = GAS_ENABLED ? 1 : 4;
 bool     statusNow = false;
 Neighbor nbr[16];
 uint32_t seenHash[64];
@@ -212,7 +243,55 @@ String repName(uint8_t n) { char b[8]; snprintf(b, sizeof(b), "REP-%02u", n); re
 void copyTelem(MsTelem& t, const uint8_t* data, int len) {
   memset(&t, 0, sizeof(t));
   t.hum = 0xFFFF;
+  t.head = 0x7FFF;                      // older body units don't send position data
+  t.alt = 0x7FFF;
   memcpy(&t, data, len < (int)sizeof(MsTelem) ? len : sizeof(MsTelem));
+}
+
+// ------------------------- gas ---------------------------------------
+void readGas(uint32_t now) {
+#if GAS_ENABLED
+  static uint32_t last = 0;
+  static uint16_t lastReported = 0;
+  if (now - last < 500) return;
+  last = now;
+  // Is a sensor really connected? An empty pin "floats" and reads random voltages (often
+  // 1.5-2.5 V), which would look like gas. Every 5 s pull the pin down for a moment: an empty
+  // pin drops to ~0 V, a pin driven by the sensor through the divider stays up.
+  static bool present = false;
+  static uint32_t lastCheck = 0;
+  if (!lastCheck || now - lastCheck > 5000) {
+    lastCheck = now | 1;
+    pinMode(GAS_PIN, INPUT_PULLDOWN);
+    delay(2);
+    uint32_t pd = 0;
+    for (int i = 0; i < 8; i++) pd += analogReadMilliVolts(GAS_PIN);
+    pinMode(GAS_PIN, INPUT);
+    analogSetPinAttenuation(GAS_PIN, ADC_11db);
+    bool was = present;
+    present = pd / 8 > 40;
+    if (present != was) Serial.printf("Gas sensor %s\n", present ? "connected" : "NOT connected (pin empty)");
+  }
+  uint32_t sum = 0;
+  for (int i = 0; i < 16; i++) sum += analogReadMilliVolts(GAS_PIN);
+  gasMv = present ? (uint16_t)(sum / 16 * GAS_DIVIDER) : 0;
+  uint8_t f = 0;
+  if (now < GAS_WARMUP_MS) f |= 1;
+  if (!present || gasMv < 30) f |= 4;                       // sensor not connected
+  // clean-air level: the lowest reading after warm-up, slowly following real drift upwards
+  static float base = 0;
+  if (f & 5) base = 0;
+  else if (base == 0 || gasMv < base) base = gasMv;
+  else base += (gasMv - base) * 0.0005f;                    // ~15 min to follow a slow drift
+  if (!(f & 5) && base > 0 && gasMv >= base + GAS_LOCAL_RISE_MV) f |= 2;
+  if ((f & 2) != (gasFlags & 2) || (!(f & 1) && gasMv > lastReported + GAS_EVENT_STEP_MV)) {
+    statusNow = true;
+    lastReported = gasMv;
+  }
+  if (gasMv + GAS_EVENT_STEP_MV < lastReported) lastReported = gasMv;
+  if ((f & 2) && !(gasFlags & 2)) Serial.printf("GAS HIGH %u mV - local alarm\n", gasMv);
+  gasFlags = f;
+#endif
 }
 
 // ------------------------- routing -----------------------------------
@@ -286,24 +365,27 @@ void queueTelemetryForHub(const MsTelem& t, int8_t bodyRssi, const uint8_t* path
   char node[11] = {0};
   for (int i = 0; i < 10 && t.node[i]; i++)
     node[i] = isalnum((unsigned char)t.node[i]) || t.node[i] == '-' || t.node[i] == '_' ? t.node[i] : '?';
-  char js[320];
+  char js[440];
   snprintf(js, sizeof(js),
            "{\"node\":\"%s\",\"seq\":%lu,\"bt\":%u,\"to\":%d,\"ta\":%d,\"ax\":%d,\"ay\":%d,\"az\":%d,"
-           "\"gx\":%d,\"gy\":%d,\"gz\":%d,\"fl\":%u,\"up\":%lu,\"rssi\":%d,\"near\":\"%s\",\"near_rssi\":%d,\"hu\":%u,\"path\":",
+           "\"gx\":%d,\"gy\":%d,\"gz\":%d,\"fl\":%u,\"up\":%lu,\"rssi\":%d,\"near\":\"%s\",\"near_rssi\":%d,\"hu\":%u,"
+           "\"st\":%u,\"hd\":%d,\"al\":%d,\"hr\":%u,\"sp\":%u,\"path\":",
            node, (unsigned long)t.seq, t.boot, t.tObj, t.tAmb, t.ax, t.ay, t.az, t.gx, t.gy, t.gz,
-           t.flags, (unsigned long)t.uptime, bodyRssi, t.nearRep ? repName(t.nearRep).c_str() : "", t.nearRssi, t.hum);
+           t.flags, (unsigned long)t.uptime, bodyRssi, t.nearRep ? repName(t.nearRep).c_str() : "", t.nearRssi, t.hum,
+           t.steps, t.head, t.alt, t.hr, t.spo2);
   String s = String(js) + pathJson(path, pathLen) + "}";
   if (nPackets == MAX_BUFFER) { for (int i = 1; i < MAX_BUFFER; i++) hubPackets[i - 1] = hubPackets[i]; nPackets--; }
   hubPackets[nPackets++] = s;
 }
 
 void queueStatusForHub(const MsStatus& st, const uint8_t* path, uint8_t pathLen) {
-  char js[340];
+  char js[400];
   snprintf(js, sizeof(js),
            "{\"id\":\"%s\",\"hop\":%u,\"parent\":\"%s\",\"prssi\":%d,\"alert_id\":%lu,\"buzzing\":%s,"
-           "\"up\":%lu,\"bodies\":%u,\"nbrs\":%u,\"path\":",
+           "\"up\":%lu,\"bodies\":%u,\"nbrs\":%u,\"gas_mv\":%u,\"gas_warm\":%s,\"gas_alarm\":%s,\"gas_missing\":%s,\"path\":",
            repName(st.rep).c_str(), st.hop, st.parent ? repName(st.parent).c_str() : "", st.parentRssi,
-           (unsigned long)st.alertId, st.buzzing ? "true" : "false", (unsigned long)st.uptime, st.bodies, st.neighbors);
+           (unsigned long)st.alertId, st.buzzing ? "true" : "false", (unsigned long)st.uptime, st.bodies, st.neighbors,
+           st.gasMv, st.gasFlags & 1 ? "true" : "false", st.gasFlags & 2 ? "true" : "false", st.gasFlags & 4 ? "true" : "false");
   String s = String(js) + pathJson(path, pathLen) + "}";
   for (int i = 0; i < nStatuses; i++)                         // keep only the newest per repeater
     if (hubStatuses[i].indexOf("\"id\":\"" + repName(st.rep) + "\"") >= 0) { hubStatuses[i] = s; return; }
@@ -356,6 +438,7 @@ MsStatus myStatus() {
   st.rep = REPEATER_NO; st.hop = myHop; st.parent = parent; st.parentRssi = parentRssi;
   st.alertId = alertId; st.buzzing = alertLevel; st.uptime = millis() / 1000;
   st.statusSeq = ++statusSeq; st.bodies = bodiesHeard; st.neighbors = neighborCount(millis());
+  st.gasMv = gasMv; st.gasFlags = gasFlags;
   return st;
 }
 
@@ -522,12 +605,14 @@ const char TEST_HTML[] =
   " <div class=\"row\"><span>Route to admin</span><b id=\"route\">-</b></div>\n"
   " <div class=\"row\"><span>Admin link</span><b id=\"hub\">-</b></div>\n"
   " <div class=\"row\"><span>Radio channel</span><b id=\"ch\">-</b></div>\n"
+  " <div class=\"row\"><span>Gas sensor</span><b id=\"gas\">-</b></div>\n"
   "</div>\n"
   "<div class=\"card\">\n"
   " <b>Fake worker (this phone acts as a body unit)</b>\n"
   " <label>Body ID<input type=\"text\" id=\"id\" value=\"PHONE-01\" maxlength=\"10\"></label>\n"
   " <label>Temperature <span class=\"val\" id=\"tv\"></span><input type=\"range\" id=\"t\" min=\"28\" max=\"42\" step=\"0.1\" value=\"33.5\"></label>\n"
   " <label>Humidity <span class=\"val\" id=\"hv\"></span><input type=\"range\" id=\"h\" min=\"20\" max=\"100\" step=\"1\" value=\"60\"></label>\n"
+  " <label>Heart rate <span class=\"val\" id=\"bv\"></span><input type=\"range\" id=\"b\" min=\"30\" max=\"190\" step=\"1\" value=\"78\"></label>\n"
   " <div class=\"sc\" id=\"sc\">\n"
   "  <button data-s=\"0\" class=\"on\">Normal</button><button data-s=\"1\">Fall</button><button data-s=\"2\">No movement</button>\n"
   "  <button data-s=\"3\">SOS</button><button data-s=\"4\">Hard impact</button><button data-s=\"5\">Sensor fault</button>\n"
@@ -538,13 +623,29 @@ const char TEST_HTML[] =
   " <small>Open the admin page on the laptop: this worker appears on the Live tab tagged PHONE TEST.\n"
   " Press ALERT there and the red light above turns on, exactly like a body unit's LED.</small>\n"
   "</div>\n"
+  "<div class=\"card\">\n"
+  " <b>Walk on the admin map</b>\n"
+  " <small>Pretend to walk: the red dot on the admin Map tab moves. Start next to the main repeater, facing into the mine.</small>\n"
+  " <div class=\"row\"><span>Steps</span><b id=\"stv\">0</b></div>\n"
+  " <div class=\"row\"><span>Turned</span><b id=\"hdv\">0&deg;</b></div>\n"
+  " <div class=\"sc\" id=\"walk\">\n"
+  "  <button data-t=\"-90\">&#8630; 90&deg;</button><button data-n=\"1\">1 step</button><button data-t=\"90\">90&deg; &#8631;</button>\n"
+  "  <button data-t=\"-30\">&#8630; 30&deg;</button><button data-n=\"5\">5 steps</button><button data-t=\"30\">30&deg; &#8631;</button>\n"
+  " </div>\n"
+  " <button class=\"big off\" id=\"auto\">Auto walk: off</button>\n"
+  " <label>Height (pressure sensor) <span class=\"val\" id=\"zv\"></span><input type=\"range\" id=\"z\" min=\"-60\" max=\"10\" step=\"1\" value=\"0\"></label>\n"
+  "</div>\n"
   "<script>\n"
-  "const $=s=>document.querySelector(s);let sc=0,on=true,busy=false;\n"
+  "const $=s=>document.querySelector(s);let sc=0,on=true,busy=false,st=0,hd=0,aw=false;\n"
+  "const wshow=()=>{$('#stv').textContent=st;$('#hdv').innerHTML=((hd%360+540)%360-180)+'&deg;';$('#zv').textContent=$('#z').value+' m';};\n"
+  "$('#walk').onclick=e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.n)st+=+b.dataset.n;if(b.dataset.t)hd+=+b.dataset.t;wshow();send();};\n"
+  "$('#auto').onclick=()=>{aw=!aw;$('#auto').className='big'+(aw?'':' off');$('#auto').textContent='Auto walk: '+(aw?'ON (1-2 steps/s)':'off');};\n"
+  "$('#z').oninput=wshow;wshow();\n"
   "$('#sc').onclick=e=>{const b=e.target.closest('button');if(!b)return;sc=+b.dataset.s;\n"
   " document.querySelectorAll('#sc button').forEach(x=>x.classList.toggle('on',x===b));send();};\n"
   "$('#go').onclick=()=>{on=!on;$('#go').className='big'+(on?'':' off');$('#go').textContent=on?'Sending every second - tap to stop':'Stopped - tap to start';};\n"
-  "const show=()=>{$('#tv').textContent=(+$('#t').value).toFixed(1)+' °C';$('#hv').textContent=$('#h').value+' %';};\n"
-  "$('#t').oninput=show;$('#h').oninput=show;show();\n"
+  "const show=()=>{$('#tv').textContent=(+$('#t').value).toFixed(1)+' °C';$('#hv').textContent=$('#h').value+' %';$('#bv').textContent=$('#b').value+' bpm';};\n"
+  "$('#t').oninput=show;$('#h').oninput=show;$('#b').oninput=show;show();\n"
   "const ago=ms=>ms<0?'never':ms<1500?'just now':Math.round(ms/1000)+' s ago';\n"
   "function paint(d){\n"
   " $('#title').textContent=d.rep+' test page';\n"
@@ -554,11 +655,13 @@ const char TEST_HTML[] =
   "  $('#hub').innerHTML='<b class=\"'+(ok?'ok':'bad')+'\">'+(ok?'OK, last post '+ago(d.hub_age):'NOT reaching admin (code '+d.hub_code+')')+'</b>';}\n"
   " else $('#hub').innerHTML='<b class=\"warn\">through '+(d.parent||'?')+'</b>';\n"
   " $('#ch').textContent=d.ch;\n"
+  " $('#gas').textContent=d.gas_missing?'not connected':(d.gas_mv+' mV'+(d.gas_warm?' (warming up)':''));\n"
   " if(d.sent!==undefined)$('#sent').textContent=d.sent;\n"
   " $('#led').className='led'+(d.led?' on':'');$('#ledt').textContent=d.led?'ALERT - LED ON':'Alert LED off';\n"
   "}\n"
   "async function send(){if(busy)return;busy=true;\n"
-  " const q=new URLSearchParams({id:$('#id').value.trim().toUpperCase()||'PHONE-01',t:$('#t').value,h:$('#h').value,s:sc});\n"
+  " if(aw&&on){st+=1+(Math.random()<.5);wshow();}\n"
+  " const q=new URLSearchParams({id:$('#id').value.trim().toUpperCase()||'PHONE-01',t:$('#t').value,h:$('#h').value,s:sc,st:st,hd:Math.round(hd*10),al:$('#z').value*10,hr:$('#b').value});\n"
   " try{paint(await (await fetch('/fake?'+q)).json());}catch(e){$('#hub').innerHTML='<b class=\"bad\">phone lost the repeater</b>';}busy=false;}\n"
   "async function status(){try{paint(await (await fetch('/status?id='+encodeURIComponent($('#id').value.trim().toUpperCase()))).json());}catch(e){}}\n"
   "setInterval(()=>{on?send():status();},1000);send();\n"
@@ -573,9 +676,9 @@ String statusJson(const String& id) {
   int32_t hubAge = lastHubOk ? (int32_t)(millis() - lastHubOk) : -1;
   snprintf(js, sizeof(js),
            "{\"rep\":\"%s\",\"gateway\":%s,\"hop\":%u,\"parent\":\"%s\",\"ch\":%u,\"hub_age\":%ld,\"hub_code\":%d,"
-           "\"led\":%s,\"sent\":%lu}",
+           "\"gas_mv\":%u,\"gas_warm\":%s,\"gas_missing\":%s,\"led\":%s,\"sent\":%lu}",
            repName(REPEATER_NO).c_str(), IS_GATEWAY ? "true" : "false", myHop, parent ? repName(parent).c_str() : "",
-           channel, (long)hubAge, lastHubCode,
+           channel, (long)hubAge, lastHubCode, gasMv, gasFlags & 1 ? "true" : "false", gasFlags & 4 ? "true" : "false",
            alertFor(id) ? "true" : "false", (unsigned long)fakeSent);
   return js;
 }
@@ -614,6 +717,12 @@ void handleFake() {
   t.uptime = now / 1000;
   t.nearRep = REPEATER_NO;
   t.nearRssi = -40;
+  t.steps = (uint16_t)web.arg("st").toInt();
+  long hd = web.arg("hd").toInt() % 3600;                  // keep it inside the int16 range
+  t.head = web.hasArg("hd") ? (int16_t)hd : 0x7FFF;
+  t.alt = web.hasArg("al") ? (int16_t)web.arg("al").toInt() : 0x7FFF;
+  t.hr = (uint8_t)constrain(web.arg("hr").toInt(), 0, 250);
+  t.spo2 = t.hr ? 97 : 0;
   processBody(t, -40);
   fakeSent++;
   web.send(200, "application/json", statusJson(id));
@@ -727,11 +836,14 @@ void setup() {
   digitalWrite(3, LOW);
   delay(100);
   pinMode(14, OUTPUT);
-  digitalWrite(14, LOW);
+  digitalWrite(14, USE_EXTERNAL_ANTENNA ? HIGH : LOW);
 #endif
   Serial.begin(115200);
   delay(1000);
   buzzerBegin();
+#if GAS_ENABLED
+  analogSetPinAttenuation(GAS_PIN, ADC_11db);
+#endif
   Serial.printf("Buzzer test on GPIO%d (%s%s): 3 beeps\n", BUZZER_PIN, BUZZER_PASSIVE ? "passive, tone" : "active",
                 BUZZER_ACTIVE_LOW ? ", active-LOW" : "");
   for (int i = 0; i < 3; i++) { beep(150); delay(150); }
@@ -754,7 +866,8 @@ void setup() {
     Serial.printf("\n%s tunnel repeater - looking for the chain\n", repName(REPEATER_NO).c_str());
   }
   esp_wifi_set_ps(WIFI_PS_NONE);          // keep the receiver awake
-  Serial.printf("ESP-NOW %s   buzzer GPIO%d\n", radioBegin() ? "OK" : "FAILED", BUZZER_PIN);
+  Serial.printf("ESP-NOW %s   buzzer GPIO%d   gas %s\n", radioBegin() ? "OK" : "FAILED", BUZZER_PIN,
+                GAS_ENABLED ? ("GPIO" + String(GAS_PIN) + " (warming up 60 s)").c_str() : "off");
 #if TEST_PAGE
   testPageBegin();
   if (IS_GATEWAY && WiFi.status() == WL_CONNECTED)
@@ -768,6 +881,7 @@ void loop() {
   uint32_t now = millis();
 
   handleRadio(now);
+  readGas(now);
   channelSearch(now);
   if (now - lastRoute > 1000) { lastRoute = now; recomputeRoute(now); }
 
@@ -807,7 +921,7 @@ void loop() {
     if (c == 'b' || c == 'B') { testUntil = now + 1000; Serial.println("Buzzer test 1 s"); }
   }
   // buzzer: 300 ms on / 200 ms off while the alert is active
-  bool buzz = (alertLevel && (now % 500) < 300) || now < testUntil;
+  bool buzz = (alertLevel && (now % 500) < 300) || ((gasFlags & 2) && (now % 200) < 100) || now < testUntil;
   buzzerSet(buzz);
   delay(2);
 }

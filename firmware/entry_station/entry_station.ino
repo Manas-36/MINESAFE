@@ -39,9 +39,14 @@
 #include <Adafruit_SSD1306.h>
 
 // ------------------------- CONFIG ------------------------------------
-const char* WIFI_SSID  = "YOUR_WIFI";
+// Copy secrets.example.h to secrets.h and fill it in (not uploaded to GitHub).
+#if __has_include("secrets.h")
+  #include "secrets.h"
+#else
+const char* WIFI_SSID  = "YOUR_HOTSPOT";
 const char* WIFI_PASS  = "YOUR_PASSWORD";
-const char* ADMIN_URL  = "http://192.168.1.100:5000/api/gear";   // laptop IP running admin_hub_test.py
+const char* ADMIN_URL  = "http://192.168.1.100:5000/api/gear";   // laptop IP running admin_hub.py
+#endif
 const char* STATION_ID = "ENTRY-01";
 
 #define PN532_IRQ    -1   // not wired - update "Adafruit PN532" to the latest version (1.3.x)

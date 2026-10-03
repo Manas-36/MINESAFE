@@ -20,7 +20,16 @@
 #  a person/pose model + a YOLOv8 PPE model + YOUR reference photos (Kit check tab).
 #  Needs:  pip install ultralytics   (the model files download by themselves on first run)
 #
+#  MAP (Map tab): upload the mine plan, click the hub = (0,0,0), set the scale, place the
+#  repeaters, draw the tunnels. Body units send step count + gyro heading (+ pressure height);
+#  the hub walks each worker's dot from the hub, keeps it inside the tunnels and resets
+#  the drift every time the worker passes close to a repeater. "Demo walker" = no hardware.
+#
+#  GAS (Gas & air tab): each repeater's MQ sensor voltage -> sensor resistance Rs -> Rs/R0
+#  -> estimated ppm of every gas on that sensor's datasheet curve.
+#
 #  Saved to disk: data/workers.json (registered workers), data/tags.json (gear tags),
+#  data/map.json + data/map/ (map), data/gas.json (gas sensor setup),
 #  photos/ (entry photos). Live readings are kept in memory only.
 # =====================================================================
 
@@ -53,16 +62,21 @@ LIMITS = {
     "temp_warn_hi": 38.0,      # deg C, body temperature from MLX90614
     "temp_danger_hi": 39.5,
     "temp_warn_lo": 32.0,      # below this: sensor off the skin, or cold exposure
+    "hr_warn_lo": 50, "hr_warn_hi": 120,       # heart rate (bpm) - only when the body unit measures it
+    "hr_danger_lo": 40, "hr_danger_hi": 150,
+    "spo2_warn": 92, "spo2_danger": 88,        # blood oxygen % (estimate from the MAX3010x)
     "signal_warn_s": 10,       # no packet for this long -> WARNING
     "signal_danger_s": 60,     # no packet for this long -> DANGER
     "repeater_offline_s": 10,       # main repeater (posts every second)
     "mesh_repeater_offline_s": 20,  # tunnel repeaters (report every 5 s through the chain)
-    "gas_alarm_mv": 1800,           # gas sensor output (mV) that raises the alert - set it on the Network tab
+    "gas_alarm_mv": 4000,           # raw sensor output (mV) that always raises the alert - set it on the Gas & air tab
 }
 
 # ---- flag bits sent by the body node (must match body_node.ino) ------
 F_FALL, F_NOMOTION, F_IMPACT, F_SOS, F_MPU_FAULT, F_TEMP_FAULT, F_ALERT_LED = (
     1, 2, 4, 8, 16, 32, 64)
+NONE16 = 0x7FFF                        # "no value" for heading / height
+F_TEST = 128                           # packet made by a repeater's phone test page
 FLAG_NAMES = {F_FALL: "Fall detected", F_NOMOTION: "No movement",
               F_IMPACT: "Hard impact", F_SOS: "SOS pressed",
               F_MPU_FAULT: "Motion sensor fault", F_TEMP_FAULT: "Temp sensor fault",
@@ -487,7 +501,7 @@ def body_status(body_id):
 #  Workers
 # =====================================================================
 WORKER_FIELDS = ["name", "emp_id", "work", "zone", "blood", "allergies", "conditions",
-                 "medication", "contact_name", "contact_phone", "notes"]
+                 "medication", "contact_name", "contact_phone", "notes", "step_m"]
 
 
 @app.post("/api/workers")
@@ -580,10 +594,16 @@ def ingest(p, rep, now):
                    "heard_by": {via: rssi}, "temp": temp, "amb": amb,
                    "ax": ax / 1000, "ay": ay / 1000, "az": az / 1000,
                    "gx": gx / 10, "gy": gy / 10, "gz": gz / 10,
-                   "amag": amag, "gmag": gmag, "fl": fl, "up": int(p.get("up", 0))}
+                   "amag": amag, "gmag": gmag, "fl": fl, "up": int(p.get("up", 0)),
+                   "hum": None if int(p.get("hu", 0xFFFF)) == 0xFFFF else round(int(p["hu"]) / 100, 1),
+                   "st": int(p.get("st", 0)) & 0xFFFF, "boot": boot,
+                   "hd": None if int(p.get("hd", NONE16)) == NONE16 else int(p["hd"]) / 10,
+                   "al": None if int(p.get("al", NONE16)) == NONE16 else int(p["al"]) / 10,
+                   "hr": int(p.get("hr", 0)) or None, "spo2": int(p.get("sp", 0)) or None}
+    update_position(bid, latest[bid], now)
     h = history.setdefault(bid, deque(maxlen=900))
     h.append((round(now, 2), None if fl & F_TEMP_FAULT else temp,
-              None if fl & F_MPU_FAULT else amag, None if fl & F_MPU_FAULT else gmag))
+              None if fl & F_MPU_FAULT else amag, None if fl & F_MPU_FAULT else gmag, latest[bid]["hr"]))
 
 
 @app.post("/api/telemetry")
@@ -615,7 +635,8 @@ def telemetry():
                          gas_local=bool(st.get("gas_alarm")), gas_missing=bool(st.get("gas_missing")))
                 g = x.setdefault("gas_hist", [])
                 g.append([round(now, 1), x["gas_mv"]])
-                del g[:-300]
+                del g[:-600]
+                gas_sample(sid, x, now)
             if sid != rep:
                 x.update(parent=str(st.get("parent", "")).upper(), via_mesh=True)
         for p in pk:
@@ -714,6 +735,17 @@ def evaluate(bid, now):
             bump(1, f"Body temp high {t:.1f} °C")
         elif t <= LIMITS["temp_warn_lo"]:
             bump(1, f"Body temp low {t:.1f} °C")
+    hr, sp = L.get("hr"), L.get("spo2")
+    if hr:
+        if hr >= LIMITS["hr_danger_hi"] or hr <= LIMITS["hr_danger_lo"]:
+            bump(2, f"Heart rate {hr} bpm")
+        elif hr >= LIMITS["hr_warn_hi"] or hr <= LIMITS["hr_warn_lo"]:
+            bump(1, f"Heart rate {hr} bpm")
+    if sp:
+        if sp <= LIMITS["spo2_danger"]:
+            bump(2, f"SpO2 {sp} %")
+        elif sp <= LIMITS["spo2_warn"]:
+            bump(1, f"SpO2 low {sp} %")
     return LEVELS[level], why
 
 
@@ -727,16 +759,19 @@ def check_gas(now):
         online = now - r["last_seen"] < LIMITS["mesh_repeater_offline_s"]
         if "gas_mv" not in r or r.get("gas_warm") or r.get("gas_missing") or not online:
             continue
-        high = r["gas_mv"] >= limit or r.get("gas_local")
+        ga = gas_analysis(rid, r)
+        bad = [g for g in (ga or {}).get("gases", []) if g["level"] == 2 and g["main"]]   # only the gases this sensor is made for
+        high = r["gas_mv"] >= limit or r.get("gas_local") or bool(bad)
+        what = ", ".join(f"{g['key']} ~{g['ppm']:.0f} ppm" for g in bad) or f"{r['gas_mv']} mV"
         gs = gas_state.setdefault(rid, {"high": False, "last_alert": 0})
         if high != gs["high"]:
             incidents.insert(0, {"t": now, "time": clock(now), "body_id": rid, "name": f"Gas at {rid}",
                                  "from": "SAFE" if high else "DANGER", "to": "DANGER" if high else "SAFE",
-                                 "why": f"Gas {r['gas_mv']} mV (limit {limit} mV)" if high else f"Gas back to {r['gas_mv']} mV"})
+                                 "why": f"Gas {what} (sensor {r['gas_mv']} mV)" if high else f"Gas back to normal ({r['gas_mv']} mV)"})
             gs["high"] = high
         if high and not alert["level"] and now - gs["last_alert"] > GAS_REALERT_S:
             gs["last_alert"] = now
-            msg = f"AUTO: gas {r['gas_mv']} mV at {rid}"
+            msg = f"AUTO: gas {what} at {rid}"
             alert.update(id=next_alert_id(), level=1, target="*", msg=msg, time=now)
             alert_log.insert(0, {"time": clock(now), "action": "AUTO ALERT", "target": "ALL WORKERS", "msg": msg})
 
@@ -776,6 +811,497 @@ def watchdog():
 
 
 # =====================================================================
+#  Map + worker positions
+#  Coordinates are metres. The hub (entry / main repeater area) is (0, 0, 0).
+#  x = right on the map, y = up on the map, z = height (negative = deeper).
+#  Headings are degrees clockwise from map-up (0 = up, 90 = right).
+# =====================================================================
+MAP_DIR = os.path.join(DATA_DIR, "map")
+os.makedirs(MAP_DIR, exist_ok=True)
+MAP_DEFAULT = {
+    "image": None, "img_w": 0, "img_h": 0,   # uploaded mine plan (pixels)
+    "ox": 0.0, "oy": 0.0,                    # hub (0,0) position on the plan, in image pixels
+    "ppm": 10.0,                             # image pixels per metre
+    "repeaters": {},                         # "REP-02": {"x": 25.0, "y": 4.0, "z": 0.0}
+    "tunnels": [],                           # [[[x, y], [x, y], ...], ...] centre lines
+    "start_dir": None,                       # direction workers face at the hub (None = along the first tunnel)
+    "step_m": 0.7,                           # default step length
+    "snap_rssi": -55,                        # body hears a repeater this strongly -> it is next to it
+    "range_m": 40.0,                         # a body can't be further than this from its nearest repeater
+}
+mapcfg = {**MAP_DEFAULT, **load("map.json", {})}
+positions = {}                               # body_id -> position state
+
+
+def _num(v, lo, hi, default):
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return default
+    return default if not math.isfinite(v) else min(max(v, lo), hi)
+
+
+def tunnel_segments():
+    segs = []
+    for line in mapcfg["tunnels"]:
+        for a, b in zip(line, line[1:]):
+            if a != b:
+                segs.append((a, b))
+    return segs
+
+
+def project(x, y, a, b):
+    ax, ay = a
+    dx, dy = b[0] - ax, b[1] - ay
+    L2 = dx * dx + dy * dy
+    t = 0.0 if L2 == 0 else max(0.0, min(1.0, ((x - ax) * dx + (y - ay) * dy) / L2))
+    qx, qy = ax + t * dx, ay + t * dy
+    return qx, qy, math.hypot(x - qx, y - qy), math.degrees(math.atan2(dx, dy)) % 360
+
+
+def snap_tunnel(x, y, heading=None):
+    """Best point on the tunnel centre lines -> (x, y, tunnel direction) or None.
+    With a walking direction, a tunnel that runs the same way wins over one that is a bit
+    closer but crosses it - so a worker can turn into a side tunnel at a junction."""
+    best, cost_best = None, None
+    for a, b in tunnel_segments():
+        q = project(x, y, a, b)
+        cost = q[2]
+        if heading is not None:
+            mis = abs(angle_diff(q[3], heading))
+            cost += 0.1 * min(mis, 180 - mis)          # 0.1 m per degree off the tunnel axis
+        if best is None or cost < cost_best:
+            best, cost_best = q, cost
+    return None if best is None else (best[0], best[1], best[3])
+
+
+def start_heading():
+    if mapcfg.get("start_dir") is not None:
+        return float(mapcfg["start_dir"]) % 360
+    best = None                               # tunnel end closest to the hub -> direction into the mine
+    for a, b in tunnel_segments():
+        for p, q in ((a, b), (b, a)):
+            d = math.hypot(*p)
+            if best is None or d < best[0]:
+                best = (d, math.degrees(math.atan2(q[0] - p[0], q[1] - p[1])) % 360)
+    return best[1] if best and best[0] < 5 else 0.0
+
+
+def rep_pos(rid):
+    r = mapcfg["repeaters"].get(rid or "")
+    return (r["x"], r["y"], r.get("z", 0.0)) if r else None
+
+
+def angle_diff(a, b):
+    return (a - b + 180) % 360 - 180
+
+
+def update_position(bid, L, now):
+    """Pedestrian dead reckoning: steps x step length along the gyro heading, kept inside
+    the tunnels and pulled back to a repeater whenever the body is right next to one."""
+    pdr = L.get("hd") is not None
+    near, nrssi = L.get("near"), L.get("near_rssi", -127)
+    rp = rep_pos(near)
+    P = positions.get(bid)
+    gateway = repeaters.get(near or "", {}).get("gateway")
+    if P is None or P["boot"] != L["boot"] or P["pdr"] != pdr:
+        if pdr:                               # switched on at the hub, or restarted right next to a repeater
+            x, y, z = rp if rp is not None and not gateway and nrssi >= mapcfg["snap_rssi"] else (0.0, 0.0, 0.0)
+        else:                                 # no step data: only "near this repeater" (if it is on the map)
+            x, y, z = rp if rp is not None else (None, None, None)
+        P = positions[bid] = {"boot": L["boot"], "pdr": pdr, "x": x, "y": y, "z": z,
+                              "z0": (L.get("al") or 0.0) - (z or 0.0), "steps": L.get("st", 0),
+                              "off": start_heading() - (L.get("hd") or 0.0), "since_fix": 0.0,
+                              "walked": 0.0, "fix": None, "trail": deque(maxlen=400), "t": now,
+                              "src": "start at hub" if (x, y) == (0.0, 0.0) else f"start at {near}"}
+        if x is not None:
+            P["trail"].append((round(x, 2), round(y, 2)))
+    P["t"] = now
+    if not pdr:                               # only "which repeater is it near" is known
+        if rp is not None:
+            if P["x"] is None:
+                P["x"], P["y"], P["z"] = rp
+            P["x"] += (rp[0] - P["x"]) * 0.5
+            P["y"] += (rp[1] - P["y"]) * 0.5
+            P["z"] = rp[2]
+            P["src"] = f"near {near} (no step sensor)"
+            P["fix"] = {"rep": near, "t": now}
+        return
+    step = _num(workers.get(bid, {}).get("step_m"), 0.3, 1.2, mapcfg["step_m"])
+    n = (L.get("st", 0) - P["steps"]) & 0xFFFF
+    P["steps"] = L.get("st", 0)
+    if n > 300:                               # counter glitch - ignore
+        n = 0
+    heading = (L["hd"] + P["off"]) % 360
+    x, y = P["x"], P["y"]
+    seg_dir = None
+    for _ in range(n):
+        x += step * math.sin(math.radians(heading))
+        y += step * math.cos(math.radians(heading))
+        sn = snap_tunnel(x, y, heading)
+        if sn:
+            x, y, seg_dir = sn
+    if n and seg_dir is not None:             # walking along a tunnel -> slowly correct the gyro drift
+        d = angle_diff(seg_dir, heading)
+        if abs(d) > 90:
+            d = angle_diff((seg_dir + 180) % 360, heading)
+        if abs(d) < 35:
+            P["off"] += d * 0.2
+    P["walked"] += n * step
+    P["since_fix"] += n * step
+    P["src"] = "steps + gyro"
+    # repeater landmarks (skipped for the phone test page: the phone talks to the repeater over
+    # WiFi, so its "signal" says nothing about where the pretend worker is walking)
+    if rp is not None and not L["fl"] & F_TEST:
+        dist = math.hypot(x - rp[0], y - rp[1])
+        lim = 6.0 if nrssi >= mapcfg["snap_rssi"] else mapcfg["range_m"]   # strong signal = within a few metres
+        if dist > lim:
+            k = (dist - lim) / dist
+            x += (rp[0] - x) * k
+            y += (rp[1] - y) * k
+            sn = snap_tunnel(x, y)
+            if sn and math.hypot(sn[0] - x, sn[1] - y) < 3:
+                x, y = sn[0], sn[1]
+        if nrssi >= mapcfg["snap_rssi"]:
+            P["since_fix"] = 0.0
+            P["fix"] = {"rep": near, "t": now}
+            P["src"] = f"steps + gyro, checked at {near}"
+    P["x"], P["y"] = x, y
+    if L.get("al") is not None:
+        P["z"] = round(L["al"] - P["z0"], 1)
+    tr = P["trail"]
+    if not tr or math.hypot(x - tr[-1][0], y - tr[-1][1]) > 0.3:
+        tr.append((round(x, 2), round(y, 2)))
+
+
+def positions_view(now):
+    out = {}
+    for bid, P in positions.items():
+        if P["x"] is None:
+            continue
+        out[bid] = {"x": round(P["x"], 2), "y": round(P["y"], 2), "z": None if P["z"] is None else round(P["z"], 1),
+                    "pdr": P["pdr"], "src": P["src"], "acc": round(1.0 + 0.05 * P["since_fix"], 1) if P["pdr"] else None,
+                    "walked": round(P["walked"]), "fix_rep": (P["fix"] or {}).get("rep"),
+                    "fix_age": round(now - P["fix"]["t"]) if P["fix"] else None,
+                    "trail": list(P["trail"])[-150:], "truth": P.get("truth")}
+    return out
+
+
+@app.get("/api/map")
+def get_map():
+    return jsonify(mapcfg)
+
+
+@app.post("/api/map")
+def set_map():
+    d = request.get_json(force=True, silent=True) or {}
+    with lock:
+        for k in ("ox", "oy"):
+            if k in d:
+                mapcfg[k] = _num(d[k], -1e6, 1e6, mapcfg[k])
+        if "ppm" in d:
+            mapcfg["ppm"] = _num(d["ppm"], 0.01, 10000, mapcfg["ppm"])
+        if "step_m" in d:
+            mapcfg["step_m"] = _num(d["step_m"], 0.3, 1.2, 0.7)
+        if "snap_rssi" in d:
+            mapcfg["snap_rssi"] = int(_num(d["snap_rssi"], -90, -30, -55))
+        if "range_m" in d:
+            mapcfg["range_m"] = _num(d["range_m"], 5, 500, 40)
+        if "start_dir" in d:
+            mapcfg["start_dir"] = None if d["start_dir"] in (None, "") else _num(d["start_dir"], -360, 720, 0) % 360
+        if "repeaters" in d and isinstance(d["repeaters"], dict):
+            mapcfg["repeaters"] = {str(k).upper()[:16]: {"x": _num(v.get("x"), -1e5, 1e5, 0), "y": _num(v.get("y"), -1e5, 1e5, 0),
+                                                         "z": _num(v.get("z"), -5000, 5000, 0)}
+                                   for k, v in d["repeaters"].items() if isinstance(v, dict)}
+        if "tunnels" in d and isinstance(d["tunnels"], list):
+            mapcfg["tunnels"] = [[[_num(p[0], -1e5, 1e5, 0), _num(p[1], -1e5, 1e5, 0)] for p in line if len(p) >= 2]
+                                 for line in d["tunnels"][:500] if isinstance(line, list) and len(line) >= 2]
+        mapcfg["rev"] = mapcfg.get("rev", 0) + 1     # lets the page ignore an older copy still on its way
+        save("map.json", mapcfg)
+        return jsonify(ok=True, map=mapcfg)
+
+
+@app.post("/api/map/image")
+def map_image():
+    f = request.files.get("image")
+    if not f:
+        return jsonify(ok=False, error="No image received"), 400
+    ext = os.path.splitext(f.filename or "")[1].lower()
+    if ext not in (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"):
+        return jsonify(ok=False, error="Use a PNG, JPG, GIF, WEBP or SVG image"), 400
+    name = f"plan_{datetime.now():%Y%m%d_%H%M%S}{ext}"
+    f.save(os.path.join(MAP_DIR, name))
+    with lock:
+        w, h = _num(request.form.get("w"), 1, 50000, 1000), _num(request.form.get("h"), 1, 50000, 1000)
+        first = not mapcfg["image"]
+        mapcfg.update(image=name, img_w=w, img_h=h)
+        if first:                              # hub starts in the middle until the admin clicks it
+            mapcfg.update(ox=w / 2, oy=h / 2, ppm=max(w, h) / 100)
+        mapcfg["rev"] = mapcfg.get("rev", 0) + 1     # lets the page ignore an older copy still on its way
+        save("map.json", mapcfg)
+    return jsonify(ok=True, map=mapcfg)
+
+
+@app.delete("/api/map/image")
+def map_image_delete():
+    with lock:
+        mapcfg["image"] = None
+        mapcfg["rev"] = mapcfg.get("rev", 0) + 1     # lets the page ignore an older copy still on its way
+        save("map.json", mapcfg)
+    return jsonify(ok=True)
+
+
+@app.get("/mapimg/<path:fn>")
+def map_img(fn):
+    return send_from_directory(MAP_DIR, fn)
+
+
+@app.post("/api/positions/reset")
+def reset_position():
+    bid = str((request.get_json(force=True, silent=True) or {}).get("body_id", "")).upper()
+    with lock:
+        if bid == "*":
+            positions.clear()
+        else:
+            positions.pop(bid, None)
+    return jsonify(ok=True)
+
+
+# ---- demo walker: a pretend worker walking the tunnels (no hardware needed) ----
+demo = {"on": False, "bid": "DEMO-01"}
+
+
+def _demo_graph():
+    lines = mapcfg["tunnels"] or [[[0, 0], [0, 20], [15, 20], [15, 0], [0, 0]]]
+    nodes, edges = [], {}
+
+    def node(p):
+        for i, q in enumerate(nodes):
+            if math.hypot(p[0] - q[0], p[1] - q[1]) < 1.0:
+                return i
+        nodes.append((float(p[0]), float(p[1])))
+        return len(nodes) - 1
+    for line in lines:
+        ids = [node(p) for p in line]
+        for a, b in zip(ids, ids[1:]):
+            if a != b:
+                edges.setdefault(a, set()).add(b)
+                edges.setdefault(b, set()).add(a)
+    return nodes, edges
+
+
+def demo_loop():
+    import random
+    D = None
+    while True:
+        time.sleep(1)
+        with lock:
+            if not demo["on"]:
+                D = None
+                continue
+            now = time.time()
+            if D is None:
+                nodes, edges = _demo_graph()
+                start = min(range(len(nodes)), key=lambda i: math.hypot(*nodes[i]))
+                nxt = sorted(edges.get(start, {start}))[0]
+                D = {"nodes": nodes, "edges": edges, "a": start, "b": nxt, "t": 0.0, "steps": 0.0, "seq": 0,
+                     "boot": random.randint(1, 65000), "drift": 0.0, "h0": None, "pause": 0}
+                positions.pop(demo["bid"], None)
+            nodes, edges = D["nodes"], D["edges"]
+            true_step = 0.75                   # the hub assumes 0.7 m -> a realistic step-length error
+            if D["pause"] > 0:
+                D["pause"] -= 1
+                dist = 0.0
+            else:
+                dist = 1.05 + random.uniform(-0.15, 0.15)
+            a, b = nodes[D["a"]], nodes[D["b"]]
+            while dist > 0:
+                seg = math.hypot(b[0] - a[0], b[1] - a[1]) or 0.01
+                left = (1 - D["t"]) * seg
+                if dist < left:
+                    D["t"] += dist / seg
+                    D["steps"] += dist / true_step
+                    dist = 0
+                else:
+                    D["steps"] += left / true_step
+                    dist -= left
+                    prev, cur = D["a"], D["b"]
+                    opts = [n for n in edges.get(cur, ()) if n != prev] or [prev]
+                    D["a"], D["b"], D["t"] = cur, random.choice(opts), 0.0
+                    if random.random() < 0.15:
+                        D["pause"] = random.randint(2, 6)
+                    a, b = nodes[D["a"]], nodes[D["b"]]
+            tx, ty = a[0] + (b[0] - a[0]) * D["t"], a[1] + (b[1] - a[1]) * D["t"]
+            true_h = math.degrees(math.atan2(b[0] - a[0], b[1] - a[1])) % 360
+            if D["h0"] is None:
+                D["h0"] = true_h
+            D["drift"] += 0.35 + random.gauss(0, 0.15)          # gyro drift, degrees per second
+            hd = angle_diff(true_h - D["h0"] + D["drift"] + random.gauss(0, 2), 0)
+            best = None
+            for rid, r in mapcfg["repeaters"].items():
+                d = math.hypot(tx - r["x"], ty - r["y"])
+                if best is None or d < best[1]:
+                    best = (rid, d)
+            if best and best[1] <= mapcfg["range_m"]:
+                near, rssi = best[0], int(-38 - 30 * math.log10(max(best[1], 1)) + random.gauss(0, 2))
+            elif best:                          # out of range of every repeater on the map
+                near, rssi = "", -127
+            else:
+                near = next((r["id"] for r in repeaters.values() if r.get("gateway")), "REP-01")
+                rssi = -60
+            D["seq"] += 1
+            p = {"node": demo["bid"], "seq": D["seq"], "bt": D["boot"], "to": int(3640 + random.gauss(0, 8)),
+                 "ta": 3100, "ax": int(random.gauss(0, 120)), "ay": int(random.gauss(0, 80)),
+                 "az": int(1000 + random.gauss(0, 150)), "gx": 0, "gy": 0, "gz": 0, "fl": 0, "up": D["seq"],
+                 "rssi": rssi, "near": near, "near_rssi": rssi, "hu": 7200, "hr": int(88 + random.gauss(0, 3)), "sp": 97,
+                 "st": int(D["steps"]) & 0xFFFF, "hd": int(hd * 10), "al": 0, "path": [near or "DEMO"]}
+            ingest(p, near, now)
+            if demo["bid"] in positions:
+                positions[demo["bid"]]["truth"] = [round(tx, 2), round(ty, 2)]
+
+
+@app.post("/api/demo")
+def demo_toggle():
+    d = request.get_json(force=True, silent=True) or {}
+    with lock:
+        demo["on"] = bool(d.get("on"))
+        if not demo["on"]:
+            positions.pop(demo["bid"], None)
+            latest.pop(demo["bid"], None)
+            seqinfo.pop(demo["bid"], None)
+            last_status.pop(demo["bid"], None)
+    return jsonify(ok=True, on=demo["on"])
+
+
+# =====================================================================
+#  Gas analysis (MQ sensors)
+#  Rs = RL x (Vc - Vout) / Vout ; R0 = Rs in clean air / clean-air ratio (datasheet)
+#  ppm = a x (Rs/R0)^b   (curve fits of the datasheet graphs, MQUnifiedsensor library)
+#  One MQ sensor reacts to all of its gases at once: each number assumes that gas is the
+#  only one present. Good for "is the air changing / dangerous", not a lab analysis.
+#  "main" = the gases the sensor is built for: only these raise the automatic alert. The others
+#  are shown for information (a small humidity / temperature change can move them a lot).
+# =====================================================================
+GAS_MODELS = {
+    "MQ-2":   {"clean": 9.83, "note": "LPG, propane, hydrogen, smoke (also reacts to methane)",
+               "main": ["LPG", "Propane", "H2"],
+               "gases": [("LPG", 574.25, -2.222), ("Propane", 658.71, -2.168), ("H2", 987.99, -2.162),
+                         ("CO", 36974, -3.109), ("Alcohol", 3616.1, -2.675)]},
+    "MQ-4":   {"clean": 4.4, "note": "methane (best choice for mines)",
+               "main": ["CH4"],
+               "gases": [("CH4", 1012.7, -2.786), ("LPG", 3811.9, -3.113)]},
+    "MQ-5":   {"clean": 6.5, "note": "natural gas / LPG",
+               "main": ["CH4", "LPG"],
+               "gases": [("CH4", 177.65, -2.56), ("LPG", 80.897, -2.431), ("H2", 1163.8, -3.874)]},
+    "MQ-7":   {"clean": 27.5, "note": "carbon monoxide (needs heater cycling for accuracy)",
+               "main": ["CO"],
+               "gases": [("CO", 99.042, -1.518), ("H2", 69.014, -1.374)]},
+    "MQ-9":   {"clean": 9.6, "note": "CO + methane + LPG",
+               "main": ["CO", "CH4"],
+               "gases": [("CO", 599.65, -2.244), ("CH4", 4269.6, -2.648), ("LPG", 1000.5, -2.186)]},
+    "MQ-135": {"clean": 3.6, "note": "air quality: CO2, ammonia, VOCs",
+               "main": ["CO2", "NH3"],
+               "gases": [("CO2", 110.47, -2.862, 400), ("NH3", 102.2, -2.473), ("CO", 605.18, -3.937),
+                         ("Alcohol", 77.255, -3.18), ("Toluene", 44.947, -3.445), ("Acetone", 34.668, -3.369)]},
+}
+# name, warning ppm, danger ppm (mine-safety style limits; methane limits = % of the explosive limit)
+GAS_INFO = {"CH4": ["Methane", 5000, 12500], "CO": ["Carbon monoxide", 35, 100], "LPG": ["LPG", 1000, 2100],
+            "Propane": ["Propane", 1000, 2100], "H2": ["Hydrogen", 4000, 10000], "Alcohol": ["Alcohol vapour", 1000, 3000],
+            "CO2": ["Carbon dioxide", 5000, 15000], "NH3": ["Ammonia", 25, 50], "Toluene": ["Toluene", 50, 100],
+            "Acetone": ["Acetone", 500, 1000]}
+GAS_CFG = {"model": "MQ-2", "rl_k": 1.0, "vc": 5.0, "r0": {}, **load("gas.json", {})}
+
+
+def gas_rs(mv):
+    v = min(mv / 1000.0, GAS_CFG["vc"] * 0.98)          # at/above the supply voltage = sensor saturated
+    if v <= 0.02:
+        return None
+    return GAS_CFG["rl_k"] * (GAS_CFG["vc"] - v) / v
+
+
+def gas_sample(rid, r, now):
+    """Called for every gas reading. Auto-calibrates R0 from the first minute of clean
+    readings after warm-up (until the admin calibrates by hand)."""
+    if r.get("gas_missing"):                 # unplugged: learn clean air again once it is back
+        if GAS_CFG["r0"].pop(rid, None):
+            save("gas.json", GAS_CFG)
+        r.pop("rs_hist", None)
+        return
+    if r.get("gas_warm"):
+        return
+    rs = gas_rs(r["gas_mv"])
+    if rs is None:
+        return
+    h = r.setdefault("rs_hist", deque(maxlen=30))
+    h.append(rs)
+    cal = GAS_CFG["r0"].get(rid)
+    if cal is None and len(h) >= 12:
+        med = sorted(h)[len(h) // 2]
+        GAS_CFG["r0"][rid] = {"r0": med / GAS_MODELS[GAS_CFG["model"]]["clean"], "rs_clean": med,
+                              "how": "auto", "time": clock(now), "model": GAS_CFG["model"]}
+        save("gas.json", GAS_CFG)
+
+
+def gas_analysis(rid, r):
+    if r.get("gas_missing") or "gas_mv" not in r:
+        return None
+    model = GAS_MODELS[GAS_CFG["model"]]
+    rs = gas_rs(r["gas_mv"])
+    cal = GAS_CFG["r0"].get(rid)
+    out = {"model": GAS_CFG["model"], "note": model["note"], "rs": None if rs is None else round(rs, 2),
+           "cal": None, "ratio": None, "gases": [], "warming": bool(r.get("gas_warm"))}
+    if cal:
+        out["cal"] = {"how": cal["how"], "time": cal["time"]}
+        r0 = cal["rs_clean"] / model["clean"]             # follows a sensor-model change
+    if rs is None or not cal or r.get("gas_warm"):
+        return out
+    ratio = rs / r0
+    out["ratio"] = round(ratio, 3)
+    for g in model["gases"]:
+        key, a, b = g[0], g[1], g[2]
+        # curve value minus what the same curve gives for clean air: clean air reads ~0 ppm
+        # (the curve fits are poor at the clean-air end), CO2 adds the normal 400 ppm of fresh air
+        ppm = max(0.0, a * ratio ** b - a * model["clean"] ** b)
+        ppm = min(ppm + (g[3] if len(g) > 3 else 0), 1e6)
+        name, warn, danger = GAS_INFO[key]
+        out["gases"].append({"key": key, "name": name, "ppm": round(ppm, 1), "warn": warn, "danger": danger,
+                             "level": 2 if ppm >= danger else 1 if ppm >= warn else 0, "main": key in model["main"]})
+    return out
+
+
+@app.post("/api/gas")
+def gas_settings():
+    d = request.get_json(force=True, silent=True) or {}
+    with lock:
+        if d.get("model") in GAS_MODELS:
+            GAS_CFG["model"] = d["model"]
+        if "rl_k" in d:
+            GAS_CFG["rl_k"] = _num(d["rl_k"], 0.1, 100, 1.0)
+        if "vc" in d:
+            GAS_CFG["vc"] = _num(d["vc"], 3.0, 5.5, 5.0)
+        if "gas_alarm_mv" in d:
+            LIMITS["gas_alarm_mv"] = int(_num(d["gas_alarm_mv"], 100, 5000, LIMITS["gas_alarm_mv"]))
+            save("settings.json", {"gas_alarm_mv": LIMITS["gas_alarm_mv"]})
+        save("gas.json", GAS_CFG)
+    return jsonify(ok=True)
+
+
+@app.post("/api/gas/calibrate")
+def gas_calibrate():
+    rid = str((request.get_json(force=True, silent=True) or {}).get("repeater", "")).upper()
+    with lock:
+        r = repeaters.get(rid)
+        h = list((r or {}).get("rs_hist", []))[-10:]
+        if not h:
+            return jsonify(ok=False, error=f"No gas readings from {rid} yet (sensor still warming up?)"), 400
+        med = sorted(h)[len(h) // 2]
+        GAS_CFG["r0"][rid] = {"r0": med / GAS_MODELS[GAS_CFG["model"]]["clean"], "rs_clean": med,
+                              "how": "clean air", "time": clock(), "model": GAS_CFG["model"]}
+        save("gas.json", GAS_CFG)
+    return jsonify(ok=True)
+
+
+# =====================================================================
 #  Dashboard data
 # =====================================================================
 def live_view(bid, now):
@@ -791,7 +1317,8 @@ def live_view(bid, now):
             "near": L["near"], "near_rssi": L["near_rssi"], "path": L["path"], "hops": L["hops"],
             "flags": [n for b, n in FLAG_NAMES.items() if L["fl"] & b],
             "loss": round(100 * si["lost"] / total, 1) if total else 0, "rx": si["rx"],
-            "up": L["up"]}
+            "up": L["up"], "hum": L.get("hum"), "steps": L.get("st"), "hd": L.get("hd"), "al": L.get("al"),
+            "hr": L.get("hr"), "spo2": L.get("spo2")}
 
 
 @app.get("/api/state")
@@ -814,8 +1341,9 @@ def state():
         for r in repeaters.values():
             age = now - r["last_seen"]
             limit = LIMITS["mesh_repeater_offline_s"] if r.get("via_mesh") else LIMITS["repeater_offline_s"]
-            reps.append({**{k: v for k, v in r.items() if k != "gas_hist"}, "age": round(age, 1), "online": age < limit,
-                         "gas_spark": [g[1] for g in r.get("gas_hist", [])[-40:]]})
+            reps.append({**{k: v for k, v in r.items() if k not in ("gas_hist", "rs_hist")}, "age": round(age, 1),
+                         "online": age < limit, "gas_spark": [g[1] for g in r.get("gas_hist", [])[-40:]],
+                         "gas": gas_analysis(r["id"], r) if "gas_mv" in r else None})
         reps.sort(key=lambda r: r["id"])
         online = [r for r in reps if r["online"]]
         a = dict(alert)
@@ -836,7 +1364,9 @@ def state():
             pending_scans=len(pending_scans), gear_list=GEAR_LIST, limits=LIMITS,
             ai={k: ai[k] for k in ("state", "detail", "classes", "ppe_error")}, kitchecks=kitchecks[:24],
             kitrefs=kitrefs["photos"], ref_match=REF_MATCH,
-            kit_names=KIT_NAMES)
+            kit_names=KIT_NAMES, map=mapcfg, map_start=start_heading(), positions=positions_view(now), demo=demo["on"],
+            gas_cfg={k: GAS_CFG[k] for k in ("model", "rl_k", "vc")}, gas_models=list(GAS_MODELS),
+            gas_info=GAS_INFO)
 
 
 @app.post("/api/kitcheck")
@@ -899,7 +1429,7 @@ def worker_history(bid):
         h = list(history.get(bid.upper(), []))[-n:]
     now = time.time()
     return jsonify(t=[round(x[0] - now, 1) for x in h], temp=[x[1] for x in h],
-                   amag=[x[2] for x in h], gmag=[x[3] for x in h])
+                   amag=[x[2] for x in h], gmag=[x[3] for x in h], hr=[x[4] if len(x) > 4 else None for x in h])
 
 
 @app.get("/")
@@ -1085,6 +1615,43 @@ tr.bad td{background:#ff4d4f14}
 .toasts{position:fixed;bottom:16px;right:16px;z-index:50;display:grid;gap:8px;width:min(360px,calc(100% - 32px))}
 .toast{background:var(--panel2);border:1px solid var(--line);border-left:5px solid var(--danger);border-radius:10px;padding:12px;box-shadow:0 8px 24px #0008;cursor:pointer}
 .toast.WARNING{border-left-color:var(--warn)}.toast.SAFE{border-left-color:var(--safe)}
+/* map */
+.maplay{display:grid;grid-template-columns:1fr 330px;gap:14px;align-items:start}
+@media (max-width:1000px){.maplay{grid-template-columns:1fr}}
+.mapwrap{padding:0;overflow:hidden;position:relative}
+.mtools{display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:10px;border-bottom:1px solid var(--line)}
+.mtools .sep{width:1px;align-self:stretch;background:var(--line);margin:0 4px}
+.mtools .btn.on{background:var(--info);border-color:var(--info);color:#fff}
+.mtools select{width:auto;padding:5px 8px;font-size:13px}
+.mhint{padding:8px 12px;font-size:13px;color:var(--muted);background:var(--panel2);border-bottom:1px solid var(--line);min-height:34px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.mhint b{color:var(--ink)}.mhint input{width:110px;padding:5px 8px}
+#msvg{display:block;width:100%;height:min(72vh,760px);background:#0a0f12;touch-action:none;user-select:none;cursor:grab}
+#msvg.tool{cursor:crosshair}#msvg.panning{cursor:grabbing}
+#msvg text{font-family:var(--font);paint-order:stroke;stroke:#0a0f12;stroke-width:3px;stroke-linejoin:round}
+.mcoord{position:absolute;right:10px;bottom:10px;font:12px var(--mono);color:var(--muted);background:#0a0f12cc;padding:3px 8px;border-radius:6px;pointer-events:none}
+.mside{display:grid;gap:14px}
+.mw{display:grid;gap:3px;padding:8px 10px;background:var(--panel2);border-radius:8px;border-left:4px solid var(--nodata);cursor:pointer}
+.mw.SAFE{border-left-color:var(--safe)}.mw.WARNING{border-left-color:var(--warn)}.mw.DANGER{border-left-color:var(--danger)}
+.mw .t{display:flex;justify-content:space-between;gap:6px;font-weight:700}
+.mw small{color:var(--muted);font-size:12px}
+.mrep{display:grid;grid-template-columns:1fr 70px auto;gap:6px;align-items:center;font-size:13px}
+.mrep input{padding:4px 6px}
+@keyframes ring{from{r:9;opacity:.9}to{r:26;opacity:0}}
+.ring{animation:ring 1.2s infinite}
+@media (prefers-reduced-motion:reduce){.ring{animation:none}}
+/* gas tab */
+.gcard{background:var(--panel);border:1px solid var(--line);border-top:4px solid var(--safe);border-radius:12px;padding:14px;display:grid;gap:10px;align-content:start}
+.gcard.WARNING{border-top-color:var(--warn)}.gcard.DANGER{border-top-color:var(--danger);box-shadow:0 0 22px #ff4d4f40}.gcard.OFF{border-top-color:var(--nodata)}
+.gcard .head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.grow{display:grid;grid-template-columns:1fr auto;gap:2px 10px;align-items:center;font-size:14px}
+.grow .v{font-family:var(--mono);font-weight:700;text-align:right}
+.grow .v.l1{color:var(--warn)}.grow .v.l2{color:#ff8a8c}
+.grow .gbar{grid-column:1/-1}
+.grow small{grid-column:1/-1;color:var(--muted);font-size:11px;margin-top:-1px}
+.gbar i.l1{background:var(--warn)}.gbar i.l2{background:var(--danger)}
+.graw{display:flex;justify-content:space-between;font-size:13px;color:var(--muted)}
+.graw b{color:var(--ink);font-family:var(--mono)}
+.gcard svg{width:100%;height:46px;display:block;background:var(--panel2);border-radius:6px}
 </style></head>
 <body>
 <div class="top">
@@ -1101,6 +1668,8 @@ tr.bad td{background:#ff4d4f14}
   </div>
   <nav id="tabs">
     <button data-v="live" class="on">Live</button>
+    <button data-v="map">Map</button>
+    <button data-v="gas">Gas &amp; air <span class="n" id="n-gas" hidden>!</span></button>
     <button data-v="workers">Register workers</button>
     <button data-v="entry">Entry check <span class="n" id="n-entry" hidden></span></button>
     <button data-v="kit">Kit check (AI)</button>
@@ -1113,6 +1682,61 @@ tr.bad td{background:#ff4d4f14}
   <section class="view on" id="v-live">
     <div id="unknown-hint"></div>
     <div class="grid" id="cards"></div>
+  </section>
+
+  <section class="view" id="v-map">
+    <div class="maplay">
+      <div class="panel mapwrap">
+        <div class="mtools" id="mtools">
+          <button class="btn small on" data-tool="move">✋ Move</button>
+          <button class="btn small" data-tool="origin">🏠 Set hub (0,0,0)</button>
+          <button class="btn small" data-tool="scale">📏 Set scale</button>
+          <button class="btn small" data-tool="tunnel">〰 Draw tunnel</button>
+          <button class="btn small" data-tool="repeater">📡 Place</button><select id="m-rep" aria-label="Repeater to place"></select>
+          <button class="btn small" data-tool="erase">🧽 Erase</button>
+          <span class="sep"></span>
+          <button class="btn small" id="m-zin" aria-label="Zoom in">＋</button><button class="btn small" id="m-zout" aria-label="Zoom out">－</button>
+          <button class="btn small" id="m-fit">Fit</button>
+          <span class="sep"></span>
+          <label class="btn small" style="display:inline-block;color:var(--ink)">🗺 Mine plan…<input type="file" id="m-file" accept="image/*" hidden></label>
+          <button class="btn small ghost" id="m-noimg" hidden>Remove plan</button>
+          <span class="spacer"></span>
+          <button class="btn small" id="m-demo">▶ Demo walker</button>
+        </div>
+        <div class="mhint" id="m-hint"></div>
+        <svg id="msvg" aria-label="Mine map"></svg>
+        <div class="mcoord" id="m-coord"></div>
+      </div>
+      <aside class="mside">
+        <div class="panel"><h3>Workers on the map</h3><div id="m-workers" style="display:grid;gap:8px"></div></div>
+        <div class="panel"><h3>Repeaters</h3><div id="m-reps" style="display:grid;gap:6px"></div>
+          <p class="note" style="margin:8px 0 0">z = height of the repeater (level), metres. Negative = below the hub.</p></div>
+        <div class="panel form"><h3>Tracking settings</h3>
+          <div class="row2"><label>Step length (m)<input id="ms-step" type="number" step="0.05" min="0.3" max="1.2"></label>
+            <label>Start direction (°)<input id="ms-dir" type="number" step="5" placeholder="auto"></label></div>
+          <div class="row2"><label>"Next to repeater" (dBm)<input id="ms-snap" type="number" step="1" min="-90" max="-30"></label>
+            <label>Repeater range (m)<input id="ms-range" type="number" step="5" min="5" max="500"></label></div>
+          <button class="btn" id="ms-save">Save settings</button>
+          <p class="note" style="margin:0">Workers start at the hub facing the start direction (blank = along the tunnel that leaves the hub).
+            A worker's own step length can be set on Register workers.</p></div>
+      </aside>
+    </div>
+  </section>
+
+  <section class="view" id="v-gas">
+    <div class="panel setrow" style="align-items:end">
+      <label style="width:150px">Gas sensor model<select id="g-model"></select></label>
+      <label style="width:120px">Load resistor RL (kΩ)<input id="g-rl" type="number" step="0.1" min="0.1"></label>
+      <label style="width:110px">Sensor supply (V)<input id="g-vc" type="number" step="0.1" min="3" max="5.5"></label>
+      <label style="width:170px">Backup alarm (sensor mV)<input id="g-limit" type="number" min="100" max="5000" step="50" inputmode="numeric"></label>
+      <button class="btn" id="g-save">Save</button>
+      <p class="note" style="flex:1;min-width:260px;margin:0" id="g-note"></p>
+    </div>
+    <div class="grid" id="gascards" style="grid-template-columns:repeat(auto-fill,minmax(320px,1fr));align-items:start"></div>
+    <p class="note" style="margin-top:14px">How the numbers are made: sensor voltage → sensor resistance Rs → Rs/R0 (R0 = Rs in clean air ÷ datasheet ratio)
+      → ppm from the datasheet curve of each gas, counted above the clean-air level. One MQ sensor reacts to all of its gases together, so each value assumes it is the only gas present —
+      treat them as <b>estimates</b>. Any gas reaching its danger level, or the backup mV level, alerts <b>all</b> workers automatically.
+      R0 is learned by itself from the first minute after warm-up (assumes clean air); press <b>Calibrate in clean air</b> to redo it.</p>
   </section>
 
   <section class="view" id="v-workers">
@@ -1143,6 +1767,7 @@ tr.bad td{background:#ff4d4f14}
             <label>Contact phone<input id="f-contact_phone" inputmode="tel"></label>
           </div>
           <label>Notes for rescuers<textarea id="f-notes" rows="2"></textarea></label>
+          <label>Step length for the map (m)<input id="f-step_m" type="number" step="0.05" min="0.3" max="1.2" placeholder="0.7 (about 0.41 × height)"></label>
           <div class="err" id="f-err"></div>
           <div style="display:flex;gap:8px"><button class="btn green" type="submit" id="f-save">Register worker</button>
           <button class="btn ghost" type="button" id="f-reset">Clear form</button></div>
@@ -1191,12 +1816,6 @@ tr.bad td{background:#ff4d4f14}
   </section>
 
   <section class="view" id="v-network">
-    <div class="panel setrow">
-      <label>Gas alarm level (sensor mV)<input id="g-limit" type="number" min="100" max="5000" step="50" inputmode="numeric"></label>
-      <button class="btn" id="g-save">Save</button>
-      <p class="note" style="flex:1;min-width:240px;margin:0">When any repeater's gas sensor reads at or above this level, the alert goes to <b>all</b> workers automatically.
-        Find your level by testing: note the reading in clean air, then with a gas lighter (unlit) near the sensor, and pick a value in between.</p>
-    </div>
     <h2>Repeater chain</h2>
     <p class="note">Body units send to the nearest repeater; each repeater passes data to the one closer to the main repeater, which sends it to this laptop.</p>
     <div class="chain" id="chain"></div>
@@ -1245,6 +1864,7 @@ function showTab(v){
   document.querySelectorAll("nav button").forEach(b => b.classList.toggle("on", b.dataset.v === v));
   document.querySelectorAll(".view").forEach(x => x.classList.toggle("on", x.id === "v-" + v));
   history.replaceState(null, "", "#" + v);
+  if (S) { renderMap(); renderMapSide(); renderGas(); }
 }
 $("#tabs").onclick = e => { const b = e.target.closest("button"); if (b) showTab(b.dataset.v); };
 if (location.hash.length > 1 && $("#v-" + location.hash.slice(1))) showTab(location.hash.slice(1));
@@ -1274,8 +1894,9 @@ function render(){
     .map(([k,c,l]) => `<span class="chip" onclick="showTab('live')"><span class="d" style="background:${c}"></span>${l} <b>${sm[k]}</b></span>`).join("")
     + `<span class="chip" onclick="showTab('network')">Repeaters <b>${S.repeaters.filter(r=>r.online).length}/${S.repeaters.length}</b></span>`
     + (() => { const g = S.repeaters.filter(r => r.online && r.gas_mv != null && !r.gas_missing); if (!g.length) return "";
-        const top = g.reduce((a, b) => b.gas_mv > a.gas_mv ? b : a), high = top.gas_mv >= S.limits.gas_alarm_mv || top.gas_local;
-        return `<span class="chip" onclick="showTab('network')" style="${high ? "background:var(--danger);border-color:var(--danger);color:#fff" : ""}"><span class="d" style="background:${high ? "#fff" : "var(--safe)"}"></span>Gas <b>${top.gas_mv} mV</b> ${esc(top.id)}</span>`; })();
+        const lvl = r => r.gas_local || r.gas_mv >= S.limits.gas_alarm_mv || (r.gas && r.gas.gases.some(q => q.main && q.level === 2)) ? 2 : r.gas && r.gas.gases.some(q => q.main && q.level === 1) ? 1 : 0;
+        const top = g.reduce((a, b) => lvl(b) > lvl(a) || (lvl(b) === lvl(a) && b.gas_mv > a.gas_mv) ? b : a), high = lvl(top) === 2;
+        return `<span class="chip" onclick="showTab('gas')" style="${high ? "background:var(--danger);border-color:var(--danger);color:#fff" : ""}"><span class="d" style="background:${high ? "#fff" : "var(--safe)"}"></span>Gas <b>${top.gas_mv} mV</b> ${esc(top.id)}</span>`; })();
   $("#live-dot").style.background = sm.DANGER ? "var(--danger)" : sm.WARNING ? "var(--warn)" : "var(--safe)";
 
   // alert banner
@@ -1318,7 +1939,7 @@ function render(){
   const hopTxt = r => r.hop == null || r.hop >= 255 ? "no route" : r.hop === 0 ? "main" : r.hop;
   $("#rtable").innerHTML = S.repeaters.map(r => `<tr class="${r.online?"":"bad"}"><td class="mono"><b>${esc(r.id)}</b>${r.gateway ? ' <span class="tag ok">MAIN</span>' : ""}</td>
      <td>${r.online ? '<span class="pill SAFE">ONLINE</span>' : '<span class="pill DANGER">OFFLINE</span>'}</td>
-     <td class="mono">${hopTxt(r)}</td><td class="mono">${esc(r.gateway ? "Admin (WiFi)" : r.parent || "–")}</td>
+     <td class="mono">${hopTxt(r)}</td><td class="mono">${esc(r.gateway ? "Admin (WiFi)" : r.parent || "–")}${r.gateway && r.ip ? `<br><a href="http://${esc(r.ip)}/" target="_blank" style="color:var(--info)">phone page: http://${esc(r.ip)}/</a>` : ""}</td>
      <td>${r.gateway ? (r.rssi != null ? sig(r.rssi) + " " + r.rssi + " dBm WiFi" : "–") : (r.prssi != null ? sig(r.prssi) + " " + r.prssi + " dBm" : "–")}</td>
      <td>${ago(r.age)}</td><td class="mono">${r.bodies ?? r.packets ?? 0}</td>
      <td class="mono">${r.gas_mv == null ? "–" : r.gas_missing ? "no sensor" : r.gas_mv + " mV" + (r.gas_warm ? " (warming)" : "")}</td>
@@ -1347,7 +1968,7 @@ function render(){
   if (S.incidents.length) lastIncidentT = Math.max(lastIncidentT, S.incidents[0].t); else if (!lastIncidentT) lastIncidentT = S.now;
 
   renderKit();
-  if (!gasEdited && document.activeElement !== $("#g-limit")) $("#g-limit").value = S.limits.gas_alarm_mv;
+  renderMap(); renderMapSide(); renderGas();
   if (openId) renderDrawer();
 }
 
@@ -1377,7 +1998,7 @@ function renderChain(all){
     html += `<div class="arrow">◀</div><div class="hopcol"><div class="hophead">${h === 0 ? "Main repeater" : h === 99 ? "No route yet" : h + (h === 1 ? " hop" : " hops") + " in"}</div>` +
       cols[h].map(r => `<div class="rnode ${r.online ? "" : "off"}"><div class="t"><span class="mono">${esc(r.id)}</span>
         ${r.buzzing ? '<span class="tag red">BUZZING</span>' : r.online ? '<span class="pill SAFE">ON</span>' : '<span class="pill DANGER">OFF</span>'}</div>
-        <div class="m">${r.gateway ? "WiFi to admin" : "sends to " + esc(r.parent || "?")} ${r.gateway ? "" : sig(r.prssi ?? -127)} · ${ago(r.age)}</div>
+        <div class="m">${r.gateway ? "WiFi to admin" + (r.ip ? " · IP " + esc(r.ip) : "") : "sends to " + esc(r.parent || "?")} ${r.gateway ? "" : sig(r.prssi ?? -127)} · ${ago(r.age)}</div>
         ${gasHtml(r)}
         ${(near[r.id] || []).map(x => `<div class="wchip ${esc(x.status)}" onclick="openWorker('${esc(x.id)}')">👷 ${esc(x.name)} <span class="note">${sig(x.live.near_rssi)}</span></div>`).join("") || '<div class="m">No workers nearby</div>'}
       </div>`).join("") + `</div>`;
@@ -1392,13 +2013,14 @@ function card(w){
       <span class="pill ${statusCls(w.status)}">${esc(w.status)}</span></div>
     <div class="metrics">
       <div class="metric"><small>Body temp</small><span>${L ? fmt(L.temp) : "–"}</span> °C</div>
-      <div class="metric"><small>Motion</small><span>${L ? fmt(L.amag,2) : "–"}</span> g</div>
+      <div class="metric"><small>Heart rate</small><span>${L && L.hr ? L.hr : "–"}</span> bpm${L && L.spo2 ? `<br><span style="font-size:12px;color:var(--muted)">SpO₂ ${L.spo2}%</span>` : ""}</div>
       <div class="metric"><small>Signal</small>${L ? sig(L.rssi) : ""} <span style="font-size:13px">${L ? ago(L.age) : "–"}</span></div>
     </div>
     <div class="reasons">${esc(w.reasons.join(" · "))}</div>
     <div class="tags">${w.cleared ? '<span class="tag ok">Entry cleared ✓</span>' : '<span class="tag">Entry not verified</span>'}
       <span class="tag">Blood ${esc(w.blood || "?")}</span>${L && (L.fl & 64) ? '<span class="tag red">LED ALERT ON</span>' : ""}
-      ${L ? `<span class="tag">📍 Near ${esc(L.near)} · ${L.hops} hop${L.hops===1?"":"s"}</span>` : ""}</div>
+      ${L ? `<span class="tag">📍 Near ${esc(L.near)} · ${L.hops} hop${L.hops===1?"":"s"}</span>` : ""}
+      ${S.positions[w.body_id] ? `<span class="tag" onclick="event.stopPropagation();showTab('map');centerOn('${esc(w.body_id)}')">🗺 ${Math.round(Math.hypot(S.positions[w.body_id].x, S.positions[w.body_id].y))} m from hub${S.positions[w.body_id].z ? " · z " + S.positions[w.body_id].z + " m" : ""}</span>` : ""}</div>
   </div>`;
 }
 
@@ -1449,6 +2071,7 @@ function renderDrawer(){
           ${x.notes ? `<dt>Notes</dt><dd>${esc(x.notes)}</dd>` : ""}</dl></div>
       <div id="d-live"></div>
       <div class="chart"><div class="ct"><span>Body temperature (°C) · last 4 min</span><b id="c-temp-v"></b></div><canvas id="c-temp"></canvas></div>
+      <div class="chart"><div class="ct"><span>Heart rate (bpm)</span><b id="c-hr-v"></b></div><canvas id="c-hr"></canvas></div>
       <div class="chart"><div class="ct"><span>Acceleration (g) · 1 g = still</span><b id="c-acc-v"></b></div><canvas id="c-acc"></canvas></div>
       <div class="chart"><div class="ct"><span>Rotation (°/s)</span><b id="c-gyro-v"></b></div><canvas id="c-gyro"></canvas></div>
       <div class="panel"><h3>Entry check</h3>${x.cleared ? `<div style="display:flex;gap:12px;align-items:center">
@@ -1463,7 +2086,9 @@ function renderDrawer(){
       <span class="pill ${statusCls(x.status)}">${esc(x.status)}</span> <span style="margin-left:8px">${esc(x.reasons.join(" · ") || "All readings normal")}</span></div>`;
   $("#d-live").innerHTML = L ? `<div class="axes">
       <div class="metric"><small>Body temp</small><span>${fmt(L.temp)}</span> °C</div>
-      <div class="metric"><small>Air temp</small><span>${fmt(L.amb)}</span> °C</div>
+      <div class="metric"><small>Air temp${L.hum != null ? " / humidity" : ""}</small><span>${fmt(L.amb)}</span> °C${L.hum != null ? ` <span style="font-size:14px">${fmt(L.hum,0)} %</span>` : ""}</div>
+      <div class="metric"><small>Heart rate / SpO₂</small><span>${L.hr || "–"}</span> bpm <span style="font-size:14px">${L.spo2 ? L.spo2 + " %" : ""}</span></div>
+      <div class="metric"><small>Steps · height</small><span style="font-size:15px">${L.steps ?? "–"} · ${L.al != null ? fmt(L.al) + " m" : "–"}</span></div>
       <div class="metric"><small>Last packet</small><span style="font-size:15px">${ago(L.age)}</span></div>
       <div class="metric"><small>Accel X / Y / Z (g)</small><span style="font-size:14px">${fmt(L.ax,2)} / ${fmt(L.ay,2)} / ${fmt(L.az,2)}</span></div>
       <div class="metric"><small>Gyro X / Y / Z (°/s)</small><span style="font-size:14px">${fmt(L.gx,0)} / ${fmt(L.gy,0)} / ${fmt(L.gz,0)}</span></div>
@@ -1480,9 +2105,10 @@ async function loadHistory(){
     const h = await api(`/api/worker/${encodeURIComponent(openId)}/history?n=240`);
     const L = (S.workers.find(w=>w.body_id===openId)||S.unknown.find(u=>u.body_id===openId)||{}).live;
     drawChart("#c-temp", h.t, h.temp, "#ff7a45", [S.limits.temp_warn_lo, S.limits.temp_warn_hi, S.limits.temp_danger_hi]);
+    drawChart("#c-hr", h.t, h.hr || [], "#ff4d6d", [S.limits.hr_warn_lo, S.limits.hr_warn_hi]);
     drawChart("#c-acc", h.t, h.amag, "#4c9bf0", [1]);
     drawChart("#c-gyro", h.t, h.gmag, "#b37feb", []);
-    if (L){ $("#c-temp-v").textContent = fmt(L.temp) + " °C"; $("#c-acc-v").textContent = fmt(L.amag,2) + " g"; $("#c-gyro-v").textContent = fmt(L.gmag,0) + " °/s"; }
+    if (L){ $("#c-hr-v").textContent = L.hr ? L.hr + " bpm" : "–"; $("#c-temp-v").textContent = fmt(L.temp) + " °C"; $("#c-acc-v").textContent = fmt(L.amag,2) + " g"; $("#c-gyro-v").textContent = fmt(L.gmag,0) + " °/s"; }
   } catch(e){}
 }
 
@@ -1506,7 +2132,7 @@ function drawChart(sel, t, v, color, refs){
 }
 
 /* ---------- worker form ---------- */
-const FIELDS = ["body_id","name","emp_id","work","zone","blood","allergies","conditions","medication","contact_name","contact_phone","notes"];
+const FIELDS = ["body_id","name","emp_id","work","zone","blood","allergies","conditions","medication","contact_name","contact_phone","notes","step_m"];
 function fillForm(w){ FIELDS.forEach(f => $("#f-"+f).value = w[f] || ""); $("#f-original").value = w.body_id || "";
   $("#form-title").textContent = w.body_id && S.workers.some(x=>x.body_id===w.body_id) ? "Edit " + (w.name||w.body_id) : "Register a worker";
   $("#f-save").textContent = $("#f-original").value && S.workers.some(x=>x.body_id===$("#f-original").value) ? "Save changes" : "Register worker"; $("#f-err").textContent = ""; }
@@ -1598,14 +2224,330 @@ const drop = $("#k-drop");
 ["dragleave","drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
 drop.addEventListener("drop", e => runKit(e.dataTransfer.files[0]));
 
-/* ---------- gas limit ---------- */
-let gasEdited = false;
-$("#g-limit").addEventListener("input", () => gasEdited = true);
-$("#g-save").onclick = async () => {
-  const r = await api("/api/settings", {gas_alarm_mv: $("#g-limit").value});
-  toast(r.ok ? `Gas alarm level set to <b>${r.gas_alarm_mv} mV</b>` : esc(r.error), r.ok ? "SAFE" : "WARNING");
-  gasEdited = false; poll();
+/* ================= MAP ================= */
+const MV = {k: 8, tx: 300, ty: 300, fitted: false};     // screen px per metre + where (0,0) is on screen
+let M = null, mapKey = "", tool = "move", draft = [], scalePts = [], mouseW = null, pan = null, mapBusy = 0;
+const svgEl = $("#msvg");
+const W2S = (x, y) => [MV.tx + x * MV.k, MV.ty - y * MV.k];
+const S2W = (sx, sy) => [(sx - MV.tx) / MV.k, (MV.ty - sy) / MV.k];
+const STC = {SAFE: "#35c47c", WARNING: "#f0b429", DANGER: "#ff4d4f", "NO DATA": "#6b7a80"};
+const f1 = v => (Math.round(v * 10) / 10).toFixed(1);
+
+function mapItems(){                       // everything the dashboard knows about, by body id
+  const out = {};
+  S.workers.forEach(w => out[w.body_id] = {id: w.body_id, name: w.name, status: w.status, reasons: w.reasons});
+  S.unknown.forEach(u => out[u.body_id] = {id: u.body_id, name: u.body_id === "DEMO-01" ? "Demo walker" : u.body_id + " (unregistered)", status: u.status, reasons: u.reasons});
+  return out;
+}
+function svgPoint(e){ const r = svgEl.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
+function syncMap(){                        // take the hub's map unless we are in the middle of an edit
+  const key = JSON.stringify(S.map);
+  if (key !== mapKey && !mapBusy && (!M || (S.map.rev || 0) >= (M.rev || 0))){ mapKey = key; M = JSON.parse(key); }
+}
+async function saveMap(part){
+  Object.assign(M, part); mapBusy++;
+  try { const r = await api("/api/map", part); if (r.ok){ M = r.map; mapKey = JSON.stringify(r.map); } }
+  catch(e){ toast("Could not save the map. Is admin_hub.py running?", "WARNING"); }
+  mapBusy--; renderMap();
+}
+
+const HINTS = {
+  move: () => `<b>Move:</b> drag to pan, mouse wheel to zoom. Click a worker to open their details.`,
+  origin: () => `<b>Set hub:</b> click the spot on the plan where the hub / entry is. It becomes <b>(0, 0, 0)</b> and everything is measured from there.`,
+  scale: () => scalePts.length < 2 ? `<b>Set scale:</b> click two points whose real distance you know (e.g. the ends of a tunnel) — point ${scalePts.length + 1} of 2.`
+    : `Distance between the two points: <input id="m-dist" type="number" step="0.1" min="0.1"> m <button class="btn small green" id="m-dist-ok">Set scale</button> <button class="btn small ghost" id="m-dist-x">Cancel</button>`,
+  tunnel: () => `<b>Draw tunnel:</b> click along the tunnel's centre line. Start on an existing tunnel to join it. ` +
+    (draft.length ? `${draft.length} point(s) — <button class="btn small green" id="m-fin">Finish (Enter)</button> <button class="btn small ghost" id="m-undo">Undo point</button> <button class="btn small ghost" id="m-cancel">Cancel (Esc)</button>` : ""),
+  repeater: () => `<b>Place repeater:</b> pick it in the list, then click where it is mounted. It jumps onto the tunnel if you click close to one.`,
+  erase: () => `<b>Erase:</b> click a repeater to take it off the map, or a tunnel to remove that tunnel line.`,
 };
+function setTool(t){
+  tool = t; draft = []; scalePts = [];
+  document.querySelectorAll("#mtools [data-tool]").forEach(b => b.classList.toggle("on", b.dataset.tool === t));
+  svgEl.classList.toggle("tool", t !== "move"); renderHint(); renderMap();
+}
+function renderHint(){
+  $("#m-hint").innerHTML = HINTS[tool]();
+  const b = id => document.getElementById(id);
+  if (b("m-fin")) b("m-fin").onclick = finishTunnel;
+  if (b("m-undo")) b("m-undo").onclick = () => { draft.pop(); renderHint(); renderMap(); };
+  if (b("m-cancel")) b("m-cancel").onclick = () => setTool("tunnel");
+  if (b("m-dist-ok")) { b("m-dist").focus(); b("m-dist-ok").onclick = applyScale; b("m-dist").onkeydown = e => e.key === "Enter" && applyScale(); }
+  if (b("m-dist-x")) b("m-dist-x").onclick = () => setTool("scale");
+}
+$("#mtools").addEventListener("click", e => { const b = e.target.closest("[data-tool]"); if (b) setTool(b.dataset.tool); });
+
+/* snapping to existing tunnels (for joining tunnels / placing repeaters) */
+function nearestOnTunnels(x, y){
+  let best = null;
+  (M.tunnels || []).forEach((line, li) => line.forEach((a, i) => {
+    if (!i) return; const b = line[i - 1], dx = a[0] - b[0], dy = a[1] - b[1], L2 = dx*dx + dy*dy;
+    const t = L2 ? Math.max(0, Math.min(1, ((x - b[0]) * dx + (y - b[1]) * dy) / L2)) : 0;
+    const q = [b[0] + t * dx, b[1] + t * dy], d = Math.hypot(x - q[0], y - q[1]);
+    if (!best || d < best.d) best = {d, q, li};
+  }));
+  (M.tunnels || []).forEach(line => line.forEach(p => { const d = Math.hypot(x - p[0], y - p[1]);
+    if (d * MV.k < 14 && (!best || d <= best.d + 0.01)) best = {d, q: [p[0], p[1]], vertex: true}; }));
+  return best;
+}
+const r2 = v => Math.round(v * 100) / 100;
+
+function mapClick(sx, sy){
+  const [x, y] = S2W(sx, sy);
+  if (tool === "move"){
+    let hit = null;
+    Object.entries(S.positions).forEach(([id, p]) => { const [px, py] = W2S(p.x, p.y); if (Math.hypot(px - sx, py - sy) < 14) hit = id; });
+    if (hit) openWorker(hit);
+    return;
+  }
+  if (tool === "origin"){                  // move everything so the clicked point becomes (0,0)
+    const part = {repeaters: {}, tunnels: M.tunnels.map(l => l.map(p => [r2(p[0] - x), r2(p[1] - y)]))};
+    Object.entries(M.repeaters).forEach(([k, r]) => part.repeaters[k] = {...r, x: r2(r.x - x), y: r2(r.y - y)});
+    if (M.image){ part.ox = M.ox + x * M.ppm; part.oy = M.oy - y * M.ppm; }
+    MV.tx += x * MV.k; MV.ty -= y * MV.k;
+    saveMap(part); api("/api/positions/reset", {body_id: "*"});
+    toast("Hub set. All distances are now measured from this point.", "SAFE"); setTool("move"); return;
+  }
+  if (tool === "scale"){
+    if (scalePts.length < 2) scalePts.push([x, y]);
+    renderHint(); renderMap(); return;
+  }
+  if (tool === "tunnel"){
+    const n = nearestOnTunnels(x, y);
+    draft.push(n && n.d * MV.k < 12 ? [r2(n.q[0]), r2(n.q[1])] : [r2(x), r2(y)]);
+    renderHint(); renderMap(); return;
+  }
+  if (tool === "repeater"){
+    const id = $("#m-rep").value; if (!id) return toast("No repeater to place. Type a name in the list first.", "WARNING");
+    const n = nearestOnTunnels(x, y), p = n && n.d < 3 ? n.q : [x, y];
+    const reps = {...M.repeaters, [id]: {x: r2(p[0]), y: r2(p[1]), z: (M.repeaters[id] || {}).z || 0}};
+    saveMap({repeaters: reps});
+    const next = [...$("#m-rep").options].map(o => o.value).find(v => !reps[v]); if (next) $("#m-rep").value = next;
+    return;
+  }
+  if (tool === "erase"){
+    const hitR = Object.entries(M.repeaters).find(([k, r]) => { const [px, py] = W2S(r.x, r.y); return Math.hypot(px - sx, py - sy) < 14; });
+    if (hitR){ const reps = {...M.repeaters}; delete reps[hitR[0]]; saveMap({repeaters: reps}); return; }
+    const n = nearestOnTunnels(x, y);
+    if (n && n.li != null && n.d * MV.k < 12){ saveMap({tunnels: M.tunnels.filter((_, i) => i !== n.li)}); }
+  }
+}
+function finishTunnel(){
+  if (draft.length >= 2) saveMap({tunnels: [...M.tunnels, draft]});
+  draft = []; renderHint(); renderMap();
+}
+function applyScale(){
+  const D = parseFloat($("#m-dist").value), [a, b] = scalePts, dw = Math.hypot(a[0] - b[0], a[1] - b[1]);
+  if (!(D > 0) || !(dw > 0)) return toast("Type the real distance in metres.", "WARNING");
+  const f = D / dw;                         // new metres per old metre - everything is stretched about the hub
+  const part = {repeaters: {}, tunnels: M.tunnels.map(l => l.map(p => [r2(p[0] * f), r2(p[1] * f)]))};
+  Object.entries(M.repeaters).forEach(([k, r]) => part.repeaters[k] = {...r, x: r2(r.x * f), y: r2(r.y * f)});
+  if (M.image) part.ppm = M.ppm / f;
+  MV.k /= f; saveMap(part); api("/api/positions/reset", {body_id: "*"});
+  toast(`Scale set: ${D} m between the two points.`, "SAFE"); setTool("move");
+}
+document.addEventListener("keydown", e => {
+  if (!$("#v-map").classList.contains("on") || e.target.matches("input,select,textarea")) return;
+  if (e.key === "Enter" && tool === "tunnel") finishTunnel();
+  if (e.key === "Escape" && tool !== "move") setTool("move");
+});
+
+/* pan + zoom */
+svgEl.addEventListener("pointerdown", e => { const [sx, sy] = svgPoint(e); pan = {sx, sy, tx: MV.tx, ty: MV.ty, moved: false}; svgEl.setPointerCapture(e.pointerId); });
+svgEl.addEventListener("pointermove", e => {
+  const [sx, sy] = svgPoint(e); mouseW = S2W(sx, sy);
+  $("#m-coord").textContent = `x ${f1(mouseW[0])}  y ${f1(mouseW[1])} m`;
+  if (pan){ const dx = sx - pan.sx, dy = sy - pan.sy;
+    if (Math.hypot(dx, dy) > 4) pan.moved = true;
+    if (pan.moved && (tool === "move" || e.buttons === 4 || e.shiftKey)){ MV.tx = pan.tx + dx; MV.ty = pan.ty + dy; svgEl.classList.add("panning"); } }
+  if (pan && pan.moved || draft.length || scalePts.length === 1) renderMap();
+});
+svgEl.addEventListener("pointerup", e => { const [sx, sy] = svgPoint(e); const p = pan; pan = null; svgEl.classList.remove("panning");
+  if (p && !p.moved) mapClick(sx, sy); });
+svgEl.addEventListener("dblclick", e => { if (tool === "tunnel"){ draft.pop(); finishTunnel(); } });
+svgEl.addEventListener("wheel", e => { e.preventDefault(); const [sx, sy] = svgPoint(e); zoomAt(sx, sy, e.deltaY < 0 ? 1.2 : 1 / 1.2); }, {passive: false});
+function zoomAt(sx, sy, f){ const k = Math.max(0.3, Math.min(400, MV.k * f)); MV.tx = sx - (sx - MV.tx) * k / MV.k; MV.ty = sy - (sy - MV.ty) * k / MV.k; MV.k = k; renderMap(); }
+$("#m-zin").onclick = () => zoomAt(svgEl.clientWidth / 2, svgEl.clientHeight / 2, 1.4);
+$("#m-zout").onclick = () => zoomAt(svgEl.clientWidth / 2, svgEl.clientHeight / 2, 1 / 1.4);
+$("#m-fit").onclick = () => fitMap();
+function fitMap(){
+  const pts = [[0, 0]];
+  if (M.image) pts.push([-M.ox / M.ppm, M.oy / M.ppm], [(M.img_w - M.ox) / M.ppm, (M.oy - M.img_h) / M.ppm]);
+  M.tunnels.forEach(l => pts.push(...l)); Object.values(M.repeaters).forEach(r => pts.push([r.x, r.y]));
+  Object.values(S.positions).forEach(p => pts.push([p.x, p.y]));
+  let x0 = Math.min(...pts.map(p => p[0])), x1 = Math.max(...pts.map(p => p[0])), y0 = Math.min(...pts.map(p => p[1])), y1 = Math.max(...pts.map(p => p[1]));
+  if (x1 - x0 < 20){ const c = (x0 + x1) / 2; x0 = c - 10; x1 = c + 10; } if (y1 - y0 < 20){ const c = (y0 + y1) / 2; y0 = c - 10; y1 = c + 10; }
+  const W = svgEl.clientWidth || 800, H = svgEl.clientHeight || 600;
+  MV.k = Math.min((W - 60) / (x1 - x0), (H - 60) / (y1 - y0));
+  MV.tx = W / 2 - (x0 + x1) / 2 * MV.k; MV.ty = H / 2 + (y0 + y1) / 2 * MV.k; MV.fitted = true; renderMap();
+}
+
+/* plan image */
+$("#m-file").onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  const url = URL.createObjectURL(f), img = new Image();
+  img.onload = async () => {
+    const fd = new FormData(); fd.append("image", f); fd.append("w", img.naturalWidth || 1000); fd.append("h", img.naturalHeight || 1000);
+    const r = await fetch("/api/map/image", {method: "POST", body: fd}).then(x => x.json()).catch(() => ({ok: false, error: "Upload failed"}));
+    URL.revokeObjectURL(url); e.target.value = "";
+    if (!r.ok) return toast(esc(r.error), "WARNING");
+    M = r.map; mapKey = JSON.stringify(r.map); fitMap();
+    toast("Plan loaded. Next: <b>Set hub</b>, then <b>Set scale</b>.", "SAFE"); setTool("origin");
+  };
+  img.src = url;
+};
+$("#m-noimg").onclick = async () => { await api("/api/map/image", null, "DELETE"); mapKey = ""; poll(); };
+$("#m-demo").onclick = async () => { const on = !S.demo; await api("/api/demo", {on});
+  toast(on ? "Demo walker started: <b>Demo walker</b> walks the tunnels. Dashed white ring = where it really is." : "Demo walker stopped.", "SAFE"); poll(); };
+
+function gridStep(){ for (const g of [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500]) if (g * MV.k >= 45) return g; return 1000; }
+function renderMap(){
+  if (!S || !$("#v-map").classList.contains("on")) return;
+  syncMap(); if (!M) return;
+  if (!MV.fitted && svgEl.clientWidth) fitMap();
+  const W = svgEl.clientWidth, H = svgEl.clientHeight, k = MV.k, out = [];
+  // plan image
+  if (M.image){ const [ix, iy] = W2S(-M.ox / M.ppm, M.oy / M.ppm);
+    out.push(`<image href="/mapimg/${encodeURIComponent(M.image)}" x="${ix}" y="${iy}" width="${M.img_w / M.ppm * k}" height="${M.img_h / M.ppm * k}" opacity=".55" preserveAspectRatio="none"/>`); }
+  // grid
+  const g = gridStep(), [wx0, wy1] = S2W(0, 0), [wx1, wy0] = S2W(W, H);
+  for (let x = Math.ceil(wx0 / g) * g; x <= wx1; x += g){ const sx = W2S(x, 0)[0];
+    out.push(`<line x1="${sx}" x2="${sx}" y1="0" y2="${H}" stroke="${Math.abs(x) < 1e-9 ? "#4c9bf055" : "#ffffff10"}"/>`,
+      `<text x="${sx + 3}" y="${H - 6}" font-size="10" fill="#6b7a80">${+x.toFixed(1)}</text>`); }
+  for (let y = Math.ceil(wy0 / g) * g; y <= wy1; y += g){ const sy = W2S(0, y)[1];
+    out.push(`<line x1="0" x2="${W}" y1="${sy}" y2="${sy}" stroke="${Math.abs(y) < 1e-9 ? "#4c9bf055" : "#ffffff10"}"/>`,
+      `<text x="4" y="${sy - 3}" font-size="10" fill="#6b7a80">${+y.toFixed(1)}</text>`); }
+  // scale bar
+  out.push(`<line x1="${W - 20 - g * k}" x2="${W - 20}" y1="${H - 30}" y2="${H - 30}" stroke="#e7eef0" stroke-width="2"/>`,
+    `<text x="${W - 20 - g * k}" y="${H - 36}" font-size="11" fill="#e7eef0">${g} m</text>`);
+  // tunnels
+  const tw = Math.max(6, 3 * k);
+  M.tunnels.forEach(l => { const pts = l.map(p => W2S(p[0], p[1]).join(",")).join(" ");
+    out.push(`<polyline points="${pts}" fill="none" stroke="#3a4a52" stroke-width="${tw}" stroke-linecap="round" stroke-linejoin="round"/>`,
+      `<polyline points="${pts}" fill="none" stroke="#8fa2a955" stroke-width="1" stroke-dasharray="4 4"/>`); });
+  if (draft.length){ const pts = [...draft, ...(mouseW ? [mouseW] : [])].map(p => W2S(p[0], p[1]).join(",")).join(" ");
+    out.push(`<polyline points="${pts}" fill="none" stroke="#4c9bf0" stroke-width="${tw}" stroke-opacity=".45" stroke-linecap="round" stroke-linejoin="round"/>`);
+    draft.forEach(p => { const [x, y] = W2S(p[0], p[1]); out.push(`<circle cx="${x}" cy="${y}" r="4" fill="#4c9bf0"/>`); }); }
+  if (scalePts.length){ const pts = [...scalePts, ...(scalePts.length === 1 && mouseW ? [mouseW] : [])].map(p => W2S(p[0], p[1]));
+    out.push(`<polyline points="${pts.map(p => p.join(",")).join(" ")}" fill="none" stroke="#f0b429" stroke-width="2" stroke-dasharray="6 4"/>`);
+    pts.forEach(p => out.push(`<circle cx="${p[0]}" cy="${p[1]}" r="5" fill="#f0b429"/>`)); }
+  // hub + start direction
+  const [hx, hy] = W2S(0, 0), sd = (M.start_dir ?? S.map_start ?? 0) * Math.PI / 180;
+  out.push(`<line x1="${hx}" y1="${hy}" x2="${hx + Math.sin(sd) * 34}" y2="${hy - Math.cos(sd) * 34}" stroke="#4c9bf0" stroke-width="2" marker-end="url(#arr)"/>`,
+    `<circle cx="${hx}" cy="${hy}" r="11" fill="#0a0f12" stroke="#4c9bf0" stroke-width="2"/><circle cx="${hx}" cy="${hy}" r="4" fill="#4c9bf0"/>`,
+    `<text x="${hx + 14}" y="${hy + 18}" font-size="12" font-weight="700" fill="#4c9bf0">HUB (0,0,0)</text>`);
+  // repeaters
+  const live = {}; S.repeaters.forEach(r => live[r.id] = r);
+  Object.entries(M.repeaters).forEach(([id, r]) => {
+    const [x, y] = W2S(r.x, r.y), L = live[id];
+    const gl = L && L.gas ? Math.max(0, ...L.gas.gases.filter(q => q.main).map(q => q.level)) : 0, gasHigh = L && (gl === 2 || L.gas_local);
+    const col = !L ? "#6b7a80" : !L.online ? "#ff4d4f" : "#35c47c";
+    out.push(`<circle cx="${x}" cy="${y}" r="${Math.max(2.5 * k, 10)}" fill="${gasHigh ? "#ff4d4f22" : "#35c47c0d"}" stroke="${gasHigh ? "#ff4d4f" : gl === 1 ? "#f0b429" : "#35c47c33"}" stroke-dasharray="3 3"/>`);
+    if (L && L.buzzing) out.push(`<circle class="ring" cx="${x}" cy="${y}" r="9" fill="none" stroke="#ff4d4f" stroke-width="2"/>`);
+    out.push(`<rect x="${x - 7}" y="${y - 7}" width="14" height="14" rx="3" fill="${col}" stroke="#0a0f12" stroke-width="2"/>`,
+      `<text x="${x + 11}" y="${y - 9}" font-size="12" font-weight="700" fill="#e7eef0">${esc(id)}${r.z ? ` <tspan fill="#8fa2a9" font-weight="400">z ${r.z}</tspan>` : ""}${gasHigh ? ` <tspan fill="#ff8a8c">GAS</tspan>` : ""}</text>`);
+  });
+  // workers
+  const items = mapItems();
+  Object.entries(S.positions).forEach(([id, p]) => {
+    const it = items[id] || {name: id, status: "NO DATA"}, c = STC[it.status] || "#6b7a80";
+    if (p.trail.length > 1) out.push(`<polyline points="${p.trail.map(q => W2S(q[0], q[1]).join(",")).join(" ")}" fill="none" stroke="${c}" stroke-opacity=".45" stroke-width="2" stroke-linejoin="round"/>`);
+    const [x, y] = W2S(p.x, p.y);
+    if (p.acc) out.push(`<circle cx="${x}" cy="${y}" r="${Math.max(p.acc * k, 9)}" fill="${c}18" stroke="${c}55"/>`);
+    if (!p.pdr) out.push(`<circle cx="${x}" cy="${y}" r="${Math.max(2.5 * k, 16)}" fill="none" stroke="${c}" stroke-dasharray="2 4"/>`);
+    if (p.truth){ const [txx, tyy] = W2S(p.truth[0], p.truth[1]);
+      out.push(`<line x1="${x}" y1="${y}" x2="${txx}" y2="${tyy}" stroke="#ffffff66" stroke-dasharray="2 3"/><circle cx="${txx}" cy="${tyy}" r="6" fill="none" stroke="#fff" stroke-dasharray="3 2"/>`); }
+    if (it.status === "DANGER") out.push(`<circle class="ring" cx="${x}" cy="${y}" r="9" fill="none" stroke="#ff4d4f" stroke-width="2"/>`);
+    out.push(`<circle cx="${x}" cy="${y}" r="8" fill="${c}" stroke="#0a0f12" stroke-width="2" style="cursor:pointer"/>`,
+      `<text x="${x + 12}" y="${y + 4}" font-size="13" font-weight="700" fill="#e7eef0">${esc(it.name)}${p.z ? ` <tspan fill="#8fa2a9" font-weight="400">z ${p.z} m</tspan>` : ""}</text>`);
+  });
+  svgEl.innerHTML = `<defs><marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4c9bf0"/></marker></defs>` + out.join("");
+}
+
+let msEdited = false;
+["#ms-step", "#ms-dir", "#ms-snap", "#ms-range"].forEach(s => $(s).addEventListener("input", () => msEdited = true));
+$("#ms-save").onclick = async () => {
+  await saveMap({step_m: $("#ms-step").value, start_dir: $("#ms-dir").value === "" ? null : $("#ms-dir").value,
+                 snap_rssi: $("#ms-snap").value, range_m: $("#ms-range").value});
+  msEdited = false; toast("Tracking settings saved.", "SAFE");
+};
+async function resetPos(id){ await api("/api/positions/reset", {body_id: id}); toast("Position reset: the dot restarts at the hub.", "SAFE"); poll(); }
+function centerOn(id){ const p = S.positions[id]; if (!p) return; MV.tx = svgEl.clientWidth / 2 - p.x * MV.k; MV.ty = svgEl.clientHeight / 2 + p.y * MV.k; renderMap(); }
+async function setRepZ(id, v){ const reps = {...M.repeaters}; if (!reps[id]) return; reps[id] = {...reps[id], z: parseFloat(v) || 0}; saveMap({repeaters: reps}); }
+
+function renderMapSide(){
+  if (!M) syncMap(); if (!M) return;
+  $("#m-demo").textContent = S.demo ? "■ Stop demo" : "▶ Demo walker"; $("#m-demo").classList.toggle("red", S.demo);
+  $("#m-noimg").hidden = !M.image;
+  const ids = [...new Set([...S.repeaters.map(r => r.id), ...Object.keys(M.repeaters)])].sort();
+  setIfChanged("#m-rep", JSON.stringify([ids, Object.keys(M.repeaters)]), () => {
+    const cur = $("#m-rep").value;
+    return (ids.length ? ids : ["REP-01"]).map(id => `<option value="${esc(id)}" ${id === cur ? "selected" : ""}>${esc(id)}${M.repeaters[id] ? " ✓" : ""}</option>`).join("");
+  });
+  if (!$("#m-hint").innerHTML) renderHint();
+  const items = mapItems(), now = Object.entries(S.positions);
+  $("#m-workers").innerHTML = now.length ? now.map(([id, p]) => { const it = items[id] || {name: id, status: "NO DATA"};
+    return `<div class="mw ${esc(it.status)}" onclick="centerOn('${esc(id)}')"><div class="t"><span>${esc(it.name)}</span><span class="pill ${statusCls(it.status)}">${esc(it.status)}</span></div>
+      <small class="mono">x ${f1(p.x)} · y ${f1(p.y)} · z ${p.z == null ? "–" : f1(p.z)} m · ${Math.round(Math.hypot(p.x, p.y))} m from hub</small>
+      <small>${esc(p.src)}${p.acc ? ` · ±${p.acc} m` : ""}${p.fix_rep ? ` · last check ${esc(p.fix_rep)} ${ago(p.fix_age)}` : ""}</small>
+      ${p.pdr ? `<button class="btn small ghost" style="justify-self:start" onclick="event.stopPropagation();resetPos('${esc(id)}')">Reset to hub</button>` : ""}</div>`; }).join("")
+    : `<div class="note">No worker on the map yet. Body units appear here once they send data — with a step sensor they start at the hub, without one they show next to their repeater (place it first). Try <b>▶ Demo walker</b>.</div>`;
+  setIfChanged("#m-reps", JSON.stringify([ids, M.repeaters, S.repeaters.map(r => [r.id, r.online])]), () => ids.length ? ids.map(id => { const r = M.repeaters[id], L = S.repeaters.find(x => x.id === id);
+    return `<div class="mrep"><span><b class="mono">${esc(id)}</b> <span class="note">${L ? (L.online ? "online" : "offline") : "not seen"}</span><br><span class="note mono">${r ? `x ${f1(r.x)} y ${f1(r.y)}` : "not on the map"}</span></span>
+      ${r ? `<input type="number" step="1" value="${r.z || 0}" title="z (m)" aria-label="${esc(id)} height" onchange="setRepZ('${esc(id)}', this.value)">` : "<span></span>"}
+      <button class="btn small ghost" onclick="$('#m-rep').value='${esc(id)}';setTool('repeater')">${r ? "Move" : "Place"}</button></div>`; }).join("")
+    : `<div class="note">No repeaters seen yet.</div>`);
+  if (!msEdited && !document.activeElement.id.startsWith("ms-")){
+    $("#ms-step").value = M.step_m; $("#ms-dir").value = M.start_dir ?? ""; $("#ms-snap").value = M.snap_rssi; $("#ms-range").value = M.range_m; }
+}
+
+/* ================= GAS ================= */
+let gasEdited = false;
+["#g-model", "#g-rl", "#g-vc", "#g-limit"].forEach(s => $(s).addEventListener("input", () => gasEdited = true));
+$("#g-save").onclick = async () => {
+  await api("/api/gas", {model: $("#g-model").value, rl_k: $("#g-rl").value, vc: $("#g-vc").value, gas_alarm_mv: $("#g-limit").value});
+  gasEdited = false; toast("Gas settings saved.", "SAFE"); poll();
+};
+async function calibrate(id){ const r = await api("/api/gas/calibrate", {repeater: id});
+  toast(r.ok ? `<b>${esc(id)}</b> calibrated: this air now counts as clean.` : esc(r.error), r.ok ? "SAFE" : "WARNING"); poll(); }
+const ppmTxt = v => v >= 10000 ? (v / 10000).toFixed(2) + " %" : v >= 100 ? Math.round(v) + " ppm" : v.toFixed(1) + " ppm";
+function gasCard(r){
+  const g = r.gas, lv = g ? Math.max(0, ...g.gases.filter(q => q.main).map(q => q.level)) : 0;
+  const high = lv === 2 || r.gas_local || r.gas_mv >= S.limits.gas_alarm_mv;
+  const st = r.gas_missing ? "OFF" : high ? "DANGER" : lv === 1 ? "WARNING" : "SAFE";
+  const label = r.gas_missing ? "NO SENSOR" : r.gas_warm ? "WARMING UP" : st;
+  const d = (r.gas_spark || []), top = Math.max(S.limits.gas_alarm_mv * 1.1, ...d, 1);
+  const pts = d.map((v, i) => `${(i / Math.max(d.length - 1, 1) * 100).toFixed(1)},${(44 - v / top * 40).toFixed(1)}`).join(" ");
+  const body = r.gas_missing ? `<div class="note">No gas sensor on this repeater (or not wired). Connect AO through the 10k/20k divider.</div>`
+    : r.gas_warm ? `<div class="note"><span class="spin"></span>Sensor heater warming up (about 1 minute after power-on).</div>`
+    : !g || !g.cal ? `<div class="note"><span class="spin"></span>Learning the clean-air level… (about 12 readings after warm-up). Keep the sensor in clean air.</div>`
+    : g.gases.map(q => `<div class="grow" style="${q.main ? "" : "opacity:.6"}"><span>${esc(q.name)}${q.name !== q.key ? ` <span class="note">${esc(q.key)}</span>` : ""}</span><span class="v ${q.level ? "l" + q.level : ""}">${ppmTxt(q.ppm)}</span>
+        <div class="gbar"><i class="${q.level ? "l" + q.level : ""}" style="width:${Math.min(100, Math.max(1.5, q.ppm / q.danger * 100)).toFixed(1)}%"></i></div>
+        <small>${q.main ? `warning ${ppmTxt(q.warn)} · danger ${ppmTxt(q.danger)}` : "side reading (sensor not made for this gas) · info only, no alarm"}</small></div>`).join("");
+  return `<div class="gcard ${st}"><div class="head"><b class="mono" style="font-size:17px">${esc(r.id)}</b>
+      <span class="pill ${st === "OFF" ? "NO" : st}">${label}</span></div>
+    <div class="note">${esc(g ? g.model + " · " + g.note : "")}${r.online ? "" : ' · <b style="color:#ff8a8c">repeater offline</b>'}</div>
+    ${body}
+    ${r.gas_missing ? "" : `<div class="graw"><span>Sensor output <b>${r.gas_mv} mV</b></span><span>Rs <b>${g && g.rs != null ? g.rs + " kΩ" : "–"}</b></span><span>Rs/R0 <b>${g && g.ratio != null ? g.ratio : "–"}</b></span></div>
+    ${d.length > 1 ? `<svg viewBox="0 0 100 46" preserveAspectRatio="none" aria-label="Sensor output, last readings"><line x1="0" x2="100" y1="${(44 - S.limits.gas_alarm_mv / top * 40).toFixed(1)}" y2="${(44 - S.limits.gas_alarm_mv / top * 40).toFixed(1)}" stroke="#f0b42999" stroke-dasharray="3 3" stroke-width="1" vector-effect="non-scaling-stroke"/>
+      <polyline points="${pts}" fill="none" stroke="${high ? "#ff4d4f" : "#4c9bf0"}" stroke-width="1.8" vector-effect="non-scaling-stroke"/></svg>` : ""}
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span class="note">${g && g.cal ? `R0 ${g.cal.how === "auto" ? "auto-learned" : "calibrated"} at ${esc(g.cal.time)}` : ""}</span>
+      ${r.gas_warm ? "" : `<button class="btn small" onclick="calibrate('${esc(r.id)}')">Calibrate in clean air</button>`}</div>`}
+  </div>`;
+}
+function renderGas(){
+  const reps = S.repeaters.filter(r => r.gas_mv != null);
+  const anyHigh = reps.some(r => !r.gas_missing && ((r.gas && r.gas.gases.some(q => q.main && q.level === 2)) || r.gas_local || r.gas_mv >= S.limits.gas_alarm_mv));
+  $("#n-gas").hidden = !anyHigh;
+  if (!$("#v-gas").classList.contains("on")) return;
+  setIfChanged("#g-model", JSON.stringify(S.gas_models), () => S.gas_models.map(m => `<option>${esc(m)}</option>`).join(""));
+  if (!gasEdited && !["g-model", "g-rl", "g-vc", "g-limit"].includes(document.activeElement.id)){
+    $("#g-model").value = S.gas_cfg.model; $("#g-rl").value = S.gas_cfg.rl_k; $("#g-vc").value = S.gas_cfg.vc; $("#g-limit").value = S.limits.gas_alarm_mv; }
+  $("#g-note").innerHTML = `The model is printed on the side of the sensor (MQ-2, MQ-4 …). Most MQ boards use RL = 1 kΩ (resistor marked <b>102</b>) and run on 5 V.
+    Backup alarm: any repeater whose raw sensor output reaches this level alerts everyone, even before calibration.`;
+  $("#gascards").innerHTML = reps.length ? reps.map(gasCard).join("")
+    : `<div class="empty">No gas readings yet. Repeater firmware with <span class="mono">GAS_ENABLED 1</span> reports its MQ sensor here.</div>`;
+}
 
 /* ---------- alerts ---------- */
 function sendAlert(target){
@@ -1635,5 +2577,6 @@ poll(); setInterval(poll, 1000); setInterval(loadHistory, 2000);
 if __name__ == "__main__":
     threading.Thread(target=watchdog, daemon=True).start()
     threading.Thread(target=load_ai, daemon=True).start()
+    threading.Thread(target=demo_loop, daemon=True).start()
     print("Admin hub running:  http://localhost:5000   (phone: http://<laptop-ip>:5000/phone)")
     app.run(host="0.0.0.0", port=5000, threaded=True)

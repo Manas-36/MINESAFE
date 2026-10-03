@@ -1,0 +1,83 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Repeater test</title>
+<style>
+:root{--bg:#0e1316;--card:#172025;--line:#2b373d;--ink:#e8eef0;--mut:#93a5ab;--ok:#35c47c;--warn:#f0b429;--bad:#ff4d4f;--acc:#4c9bf0}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px system-ui,sans-serif;padding:14px;display:grid;gap:12px}
+h1{font-size:20px;margin:0}.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;display:grid;gap:10px}
+.row{display:flex;justify-content:space-between;gap:8px;font-size:14px}.row span:first-child{color:var(--mut)}
+b.ok{color:var(--ok)}b.bad{color:var(--bad)}b.warn{color:var(--warn)}
+label{display:grid;gap:4px;font-size:13px;color:var(--mut)}input[type=text]{font:inherit;padding:10px;border-radius:8px;border:1px solid var(--line);background:#0b1013;color:var(--ink)}
+input[type=range]{width:100%}.val{color:var(--ink);font-weight:700}
+.sc{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.sc button{font:inherit;font-size:14px;padding:12px 4px;border-radius:9px;border:1px solid var(--line);background:#0b1013;color:var(--ink)}
+.sc button.on{background:var(--acc);border-color:var(--acc);color:#fff}
+.big{font:inherit;font-weight:700;padding:14px;border-radius:10px;border:0;background:var(--ok);color:#062414}.big.off{background:#3a4448;color:var(--ink)}
+.led{display:flex;align-items:center;gap:12px;font-weight:700}.led i{width:26px;height:26px;border-radius:50%;background:#3a1416;border:2px solid #5a1f24}
+.led.on i{background:var(--bad);box-shadow:0 0 18px var(--bad);animation:p .6s infinite alternate}@keyframes p{to{opacity:.4}}
+small{color:var(--mut)}
+</style></head><body>
+<h1 id="title">Repeater test</h1>
+<div class="card">
+ <div class="row"><span>Role</span><b id="role">-</b></div>
+ <div class="row"><span>Route to admin</span><b id="route">-</b></div>
+ <div class="row"><span>Admin link</span><b id="hub">-</b></div>
+ <div class="row"><span>Radio channel</span><b id="ch">-</b></div>
+ <div class="row"><span>Gas sensor</span><b id="gas">-</b></div>
+</div>
+<div class="card">
+ <b>Fake worker (this phone acts as a body unit)</b>
+ <label>Body ID<input type="text" id="id" value="PHONE-01" maxlength="10"></label>
+ <label>Temperature <span class="val" id="tv"></span><input type="range" id="t" min="28" max="42" step="0.1" value="33.5"></label>
+ <label>Humidity <span class="val" id="hv"></span><input type="range" id="h" min="20" max="100" step="1" value="60"></label>
+ <div class="sc" id="sc">
+  <button data-s="0" class="on">Normal</button><button data-s="1">Fall</button><button data-s="2">No movement</button>
+  <button data-s="3">SOS</button><button data-s="4">Hard impact</button><button data-s="5">Sensor fault</button>
+ </div>
+ <button class="big" id="go">Sending every second - tap to stop</button>
+ <div class="row"><span>Packets sent from this phone</span><b id="sent">0</b></div>
+ <div class="led" id="led"><i></i><span id="ledt">Alert LED off</span></div>
+ <small>Open the admin page on the laptop: this worker appears on the Live tab tagged PHONE TEST.
+ Press ALERT there and the red light above turns on, exactly like a body unit's LED.</small>
+</div>
+<div class="card">
+ <b>Walk on the admin map</b>
+ <small>Pretend to walk: the red dot on the admin Map tab moves. Start next to the main repeater, facing into the mine.</small>
+ <div class="row"><span>Steps</span><b id="stv">0</b></div>
+ <div class="row"><span>Turned</span><b id="hdv">0&deg;</b></div>
+ <div class="sc" id="walk">
+  <button data-t="-90">&#8630; 90&deg;</button><button data-n="1">1 step</button><button data-t="90">90&deg; &#8631;</button>
+  <button data-t="-30">&#8630; 30&deg;</button><button data-n="5">5 steps</button><button data-t="30">30&deg; &#8631;</button>
+ </div>
+ <button class="big off" id="auto">Auto walk: off</button>
+ <label>Height (pressure sensor) <span class="val" id="zv"></span><input type="range" id="z" min="-60" max="10" step="1" value="0"></label>
+</div>
+<script>
+const $=s=>document.querySelector(s);let sc=0,on=true,busy=false,st=0,hd=0,aw=false;
+const wshow=()=>{$('#stv').textContent=st;$('#hdv').innerHTML=((hd%360+540)%360-180)+'&deg;';$('#zv').textContent=$('#z').value+' m';};
+$('#walk').onclick=e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.n)st+=+b.dataset.n;if(b.dataset.t)hd+=+b.dataset.t;wshow();send();};
+$('#auto').onclick=()=>{aw=!aw;$('#auto').className='big'+(aw?'':' off');$('#auto').textContent='Auto walk: '+(aw?'ON (1-2 steps/s)':'off');};
+$('#z').oninput=wshow;wshow();
+$('#sc').onclick=e=>{const b=e.target.closest('button');if(!b)return;sc=+b.dataset.s;
+ document.querySelectorAll('#sc button').forEach(x=>x.classList.toggle('on',x===b));send();};
+$('#go').onclick=()=>{on=!on;$('#go').className='big'+(on?'':' off');$('#go').textContent=on?'Sending every second - tap to stop':'Stopped - tap to start';};
+const show=()=>{$('#tv').textContent=(+$('#t').value).toFixed(1)+' °C';$('#hv').textContent=$('#h').value+' %';};
+$('#t').oninput=show;$('#h').oninput=show;show();
+const ago=ms=>ms<0?'never':ms<1500?'just now':Math.round(ms/1000)+' s ago';
+function paint(d){
+ $('#title').textContent=d.rep+' test page';
+ $('#role').textContent=d.gateway?'Main repeater (WiFi to admin)':'Tunnel repeater';
+ $('#route').innerHTML=d.gateway?'<b class="ok">direct</b>':(d.hop<255?'<b class="ok">'+d.hop+' hop(s) via '+d.parent+'</b>':'<b class="bad">no route yet</b>');
+ if(d.gateway){const ok=d.hub_age>=0&&d.hub_age<3000;
+  $('#hub').innerHTML='<b class="'+(ok?'ok':'bad')+'">'+(ok?'OK, last post '+ago(d.hub_age):'NOT reaching admin (code '+d.hub_code+')')+'</b>';}
+ else $('#hub').innerHTML='<b class="warn">through '+(d.parent||'?')+'</b>';
+ $('#ch').textContent=d.ch;
+ $('#gas').textContent=d.gas_missing?'not connected':(d.gas_mv+' mV'+(d.gas_warm?' (warming up)':''));
+ if(d.sent!==undefined)$('#sent').textContent=d.sent;
+ $('#led').className='led'+(d.led?' on':'');$('#ledt').textContent=d.led?'ALERT - LED ON':'Alert LED off';
+}
+async function send(){if(busy)return;busy=true;
+ if(aw&&on){st+=1+(Math.random()<.5);wshow();}
+ const q=new URLSearchParams({id:$('#id').value.trim().toUpperCase()||'PHONE-01',t:$('#t').value,h:$('#h').value,s:sc,st:st,hd:Math.round(hd*10),al:$('#z').value*10});
+ try{paint(await (await fetch('/fake?'+q)).json());}catch(e){$('#hub').innerHTML='<b class="bad">phone lost the repeater</b>';}busy=false;}
+async function status(){try{paint(await (await fetch('/status?id='+encodeURIComponent($('#id').value.trim().toUpperCase()))).json());}catch(e){}}
+setInterval(()=>{on?send():status();},1000);send();
+</script></body></html>
