@@ -1,0 +1,31 @@
+Subsystem,Component,Specification,Function,Unit price (INR),Qty per unit,Units deployed,Total (INR)
+Wearable Hub,Microcontroller,"ESP32-WROOM-32 Dev Board (Espressif, dual-core 240MHz, Wi-Fi + BLE 5.0)",Central controller; sensor aggregation and radio management,450,1,20,20,9000
+Wearable Hub,UWB Positioning Module,"DWM3000 (Qorvo/Decawave, IEEE 802.15.4z compliant)",Sub-metre ranging against fixed underground UWB anchors,2000,1,20,20,40000
+Wearable Hub,Inertial Measurement Unit,"MPU-6050 (InvenSense, 6-axis accelerometer + gyroscope, I2C)","Fall/impact detection, dead-reckoning between UWB fixes",100,1,20,20,2000
+Wearable Hub,Heart Rate / SpO2 Sensor,"MAX30102 (Analog Devices, PPG optical sensor, I2C)",Continuous heart rate and blood-oxygen monitoring,200,1,20,20,4000
+Wearable Hub,Body Temperature Sensor,"MLX90614 (Melexis, non-contact IR thermometer, ±0.5°C, I2C)",Continuous non-contact body temperature,600,1,20,20,12000
+Wearable Hub,LoRa Radio Module,"SX1262-based module, e.g. E22-900T22S (Semtech, 868/915MHz, +22dBm)",Long-range low-power backhaul to nearest repeater,400,1,20,20,8000
+Wearable Hub,NFC Reader Module,"PN532 (NXP, 13.56MHz, I2C/SPI/UART)","Reads worker ID badge at shift start, binds session to hub",350,1,20,20,7000
+Wearable Hub,Gas Sensor (optional),"MQ-2 module (combustible gas / smoke, analog output)",Local per-worker hazard sensing,150,1,20,20,3000
+Wearable Hub,Helmet Strap Microswitch,"SPDT micro limit switch, panel-mount",Mechanical confirmation the chin strap is fastened,40,1,20,20,800
+Wearable Hub,SOS Push Button,"12mm waterproof momentary switch, illuminated","Manual emergency escalation, bypasses automated rules",30,1,20,20,600
+Wearable Hub,Battery Pack,"18650 Li-ion cell, 3.7V 3400mAh (e.g. Samsung/LG INR18650) + TP4056 charge module",Power for a full 8+ hour shift,350,1,20,20,7000
+Wearable Hub,"Enclosure, PCB & Wiring","Custom IP66-rated ABS enclosure, PCB, connectors","Housing, protection, and assembly",300,1,20,20,6000
+Wearable Hub,Worker ID Badge Tag,"NTAG213 NFC wristband tag (13.56MHz, 144-byte memory)","Worker identity credential, read at chamber and hub",25,1,20,20,500
+Wearable Hub,PPE UHF RFID Tags,"Alien Higgs-3 UHF inlay (860-960MHz, EPC Gen2, adhesive)","Embedded in helmet, vest, gloves, and boots (4 items)",30,4,20,80,2400
+Entry Chamber,UHF RFID Fixed Reader,"Chainway UR4, 4-port fixed reader (860-960MHz, EPC Gen2, Ethernet/RS232/Wiegand)",Reads all PPE tags present in the chamber portal,28000,1,2,2,56000
+Entry Chamber,UHF Panel Antenna,8dBi circular-polarized UHF antenna,Portal read coverage across the walkway,3000,2,2,4,12000
+Entry Chamber,Edge AI Compute Unit,"Raspberry Pi 4 Model B, 4GB RAM",Runs TensorFlow Lite YOLO PPE-detection model locally,5500,1,2,2,11000
+Entry Chamber,AI Verification Camera,"Raspberry Pi Camera Module 3 (12MP, autofocus)",Captures worker image for camera-based PPE confirmation,2500,1,2,2,5000
+Entry Chamber,Fixed NFC Badge Reader,"PN532-based fixed reader unit, wall-mount",Reads worker ID badge at chamber entrance,350,1,2,2,700
+Entry Chamber,Electromagnetic Door Lock,"12V DC solenoid lock, 280kg holding force",Gate lock; releases only on verified PPE compliance,1500,1,2,2,3000
+Entry Chamber,Power Supply & Mounting Hardware,"12V/5V SMPS, frame and mounting brackets",Chamber power and physical structure,3000,1,2,2,6000
+Repeater Node,UWB Anchor Module,"DWM3000 (Qorvo/Decawave), fixed and surveyed installation",Fixed positioning reference point for worker ranging,2000,1,8,8,16000
+Repeater Node,LoRa Relay Transceivers,SX1262-based modules (e.g. E22-900T22S),"One link toward worker side, one toward next hop to surface",400,2,8,16,6400
+Repeater Node,Local Aggregator,ESP32-WROOM-32 (light junctions) or Raspberry Pi 4 (busy junctions),Buffers and forwards data if next hop briefly unreachable,450,1,8,8,3600
+Repeater Node,Enclosure,IP67 polycarbonate junction enclosure (ATEX-rated variant for gassy coal mines),"Protection against dust, humidity, and vibration",800,1,8,8,6400
+Repeater Node,Power Module,Mains-tap PSU with 12V/2200mAh battery backup,Node power with backup during mains interruption,700,1,8,8,5600
+Surface gateway,Industrial LTE/Ethernet Gateway,"Teltonika RUT956, dual-SIM 4G router with Ethernet and I/O","Aggregates repeater chain data, uplinks to internet",12000,1,1,1,12000
+Surface gateway,LoRa Concentrator Gateway,"RAK2245, 8-channel LoRaWAN concentrator (Raspberry Pi HAT)",Aggregates LoRa traffic from the repeater chain,8000,1,1,1,8000
+Surface gateway,Surface Antenna & Enclosure,"Combo LoRa/4G antenna, IP65 outdoor enclosure",Surface unit housing and connectivity,2000,1,1,1,2000
+Server,On-Premise Edge Server,"Mini-PC / Edge Server, e.g. Intel NUC 13 Pro (i5, 16GB RAM, 512GB SSD)","Hosts multilateration engine, database, and dashboard backend",45000,1,1,1,45000

@@ -1,0 +1,14 @@
+# secrets (Wi-Fi password, laptop IP)
+secrets.h
+
+# hub runtime data
+hub/data/
+hub/photos/
+hub/models/
+__pycache__/
+*.pyc
+
+# Arduino / OS
+build/
+.DS_Store
+Thumbs.db
