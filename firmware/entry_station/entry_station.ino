@@ -1,24 +1,31 @@
 // =====================================================================
-//  Miner Safety System - ENTRY STATION (gear tag reader / writer)
+//  Miner Safety System - ENTRY STATION v2 (2 buttons)
 //  Board : Seeed XIAO ESP32-C6   (Arduino ESP32 core 3.x)
 //  Parts : PN532 NFC (I2C mode), SSD1306 0.96" 128x64 I2C OLED,
-//          1 push button, NTAG215 tags
-//  Libs  : Adafruit PN532, Adafruit SSD1306, Adafruit GFX
+//          2 push buttons (READ, WRITE), NTAG215 tags
+//  Libs  : Adafruit PN532 (latest), Adafruit SSD1306, Adafruit GFX
 //
-//  WIRING (PN532 and OLED share the I2C bus: PN532=0x24, OLED=0x3C)
-//    PN532 VCC/OLED VCC -> 3V3        PN532 GND/OLED GND -> GND
-//    PN532 SDA/OLED SDA -> D4         PN532 SCL/OLED SCL -> D5
-//    PN532 IRQ          -> D2         PN532 RST          -> D3
-//    Button             -> D1 and GND (internal pull-up used)
+//  WIRING (PN532 and OLED share I2C: PN532=0x24, OLED=0x3C)
+//    PN532 VCC / OLED VCC -> 3V3      PN532 GND / OLED GND -> GND
+//    PN532 SDA / OLED SDA -> D4       PN532 SCL / OLED SCL -> D5
+//    PN532 IRQ / RST      -> not needed (latest library polls "ready" over I2C)
+//    READ  button         -> D1 and GND   (internal pull-up)
+//    WRITE button         -> D0 and GND   (internal pull-up)
 //
-//  BUTTON / MODES
-//    READ   : default. Tap a tag -> shows gear + UID, sends "scan" to admin.
-//             Long press -> SELECT.
-//    SELECT : HELMET / VEST / PANTS / SHOES. Short press = next item,
-//             long press = choose it -> WRITE. 20 s idle -> back to READ.
-//    WRITE  : tap a tag -> writes the gear, verifies, sends "write" to admin,
-//             then returns to SELECT with the NEXT item highlighted
-//             (so a full kit is issued quickly). Long press = cancel -> READ.
+//  HOW IT WORKS
+//   READ button  : always takes you to READ mode (from any screen).
+//   READ mode    : "Tap tag" -> tap a tag -> SUCCESS screen with the gear
+//                  name + admin verdict -> back to "Tap tag" after 3 s.
+//   WRITE button : opens the gear menu (HELMET / VEST / PANTS / SHOES).
+//     in menu    : WRITE tap  = move to next item
+//                  WRITE hold = select (a bar fills while holding)
+//     after pick : "Place tag for VEST" -> tap tag -> SUCCESS screen,
+//                  then back to the menu on the SAME item, so you can
+//                  write many helmets in a row or pick anything else.
+//                  Menu shows how many of each you wrote (e.g. HELMET x3).
+//                  WRITE tap here = go back and change the item.
+//   A tag already written as a different item in this session -> warning.
+//   30 s with no button press in write screens -> back to READ.
 //
 //  TAG FORMAT (NTAG215 pages 4..7, 16 bytes): "MS1:" + gear name, zero padded.
 //  Pages 0..3 (UID, lock bits, CC) are never touched.
@@ -34,117 +41,177 @@
 // ------------------------- CONFIG ------------------------------------
 const char* WIFI_SSID  = "YOUR_WIFI";
 const char* WIFI_PASS  = "YOUR_PASSWORD";
-const char* ADMIN_URL  = "http://192.168.1.100:5000/api/gear";  // admin hub endpoint
+const char* ADMIN_URL  = "http://192.168.1.100:5000/api/gear";   // laptop IP running admin_hub_test.py
 const char* STATION_ID = "ENTRY-01";
 
-#define PN532_IRQ    D2
-#define PN532_RESET  D3
-#define BTN_PIN      D1
+#define PN532_IRQ    -1   // not wired - update "Adafruit PN532" to the latest version (1.3.x)
+#define PN532_RESET  -1   // not wired
+#define BTN_READ     D1
+#define BTN_WRITE    D0
 
-#define LONG_MS            800     // hold time for a long press
+#define LONG_MS            800     // hold time to select in menu
 #define DEBOUNCE_MS        30
-#define SELECT_TIMEOUT_MS  20000   // idle time before SELECT/WRITE falls back to READ
-#define SAME_TAG_IGNORE_MS 3000    // don't resend the same tag while it sits on the reader
+#define IDLE_TIMEOUT_MS    30000   // write screens fall back to READ
+#define RESULT_MS          3000    // how long the read result stays
+#define SAME_TAG_IGNORE_MS 3000    // ignore the same tag sitting on the reader
 // ---------------------------------------------------------------------
+
+#define W SSD1306_WHITE
+#define B SSD1306_BLACK
 
 Adafruit_PN532   nfc(PN532_IRQ, PN532_RESET);
 Adafruit_SSD1306 oled(128, 64, &Wire, -1);
 
-const char*   GEAR[]   = {"HELMET", "VEST", "PANTS", "SHOES"};
-const uint8_t GEAR_N   = 4;
+const char*   GEAR[] = {"HELMET", "VEST", "PANTS", "SHOES"};
+const uint8_t GEAR_N = 4;
 const char    TAG_PREFIX[] = "MS1:";
 
-enum Mode { READ_MODE, SELECT_MODE, WRITE_MODE };
-Mode    mode   = READ_MODE;
-uint8_t cursor = 0;
-unsigned long lastActivity = 0;
+enum Mode { READ_IDLE, READ_RESULT, MENU, WRITE_WAIT };
+Mode mode = READ_IDLE;
 
-String lastGear   = "-";
-String lastUid    = "";
-String lastStatus = "";
-String lastSeenUid = "";
+uint8_t cursor = 0;
+uint16_t writtenCount[GEAR_N];   // how many of each item written this session
+
+#define SESSION_MAX 60           // remember tags written this session
+String  sessUid[SESSION_MAX];
+uint8_t sessGear[SESSION_MAX];
+uint8_t sessN = 0;
+unsigned long lastTouch = 0, resultAt = 0;
+String  lastSeenUid = "";
 unsigned long lastSeenAt = 0;
 
-// ------------------------- BUTTON ------------------------------------
+// ------------------------- BUTTONS -----------------------------------
 enum BtnEvent { BTN_NONE, BTN_SHORT, BTN_LONG };
-bool btnDown = false, longFired = false;
-unsigned long btnPressedAt = 0, lastEdge = 0;
 
-BtnEvent pollButton() {
-  bool pressed = (digitalRead(BTN_PIN) == LOW);
+struct Button {
+  uint8_t pin;
+  bool down = false, longFired = false;
+  unsigned long pressedAt = 0, lastEdge = 0;
+};
+Button btnR{BTN_READ}, btnW{BTN_WRITE};
+
+BtnEvent poll(Button& b) {
+  bool pressed = (digitalRead(b.pin) == LOW);
   unsigned long now = millis();
-
-  if (pressed != btnDown && now - lastEdge > DEBOUNCE_MS) {
-    lastEdge = now;
-    btnDown  = pressed;
-    if (pressed) {
-      btnPressedAt = now;
-      longFired = false;
-    } else if (!longFired) {
-      return BTN_SHORT;                       // released before long threshold
-    }
+  if (pressed != b.down && now - b.lastEdge > DEBOUNCE_MS) {
+    b.lastEdge = now;
+    b.down = pressed;
+    if (pressed) { b.pressedAt = now; b.longFired = false; }
+    else if (!b.longFired) return BTN_SHORT;
   }
-  if (btnDown && !longFired && now - btnPressedAt >= LONG_MS) {
-    longFired = true;                         // fires while still held
+  if (b.down && !b.longFired && now - b.pressedAt >= LONG_MS) {
+    b.longFired = true;
     return BTN_LONG;
   }
   return BTN_NONE;
 }
 
-// ------------------------- DISPLAY -----------------------------------
-void header(const char* title) {
+// ------------------------- DRAW HELPERS ------------------------------
+void centerText(const String& s, int y, uint8_t size) {
+  oled.setTextSize(size);
+  int x = (128 - (int)s.length() * 6 * size) / 2;
+  oled.setCursor(x < 0 ? 0 : x, y);
+  oled.print(s);
+}
+
+void header(const char* left, const char* right) {
   oled.clearDisplay();
+  oled.setTextColor(W);
   oled.setTextSize(1);
-  oled.setTextColor(SSD1306_WHITE);
   oled.setCursor(0, 0);
-  oled.print(title);
-  oled.setCursor(98, 0);
-  oled.print(WiFi.status() == WL_CONNECTED ? "WiFi" : "----");
-  oled.drawFastHLine(0, 10, 128, SSD1306_WHITE);
+  oled.print(left);
+  oled.setCursor(128 - strlen(right) * 6, 0);
+  oled.print(right);
+  oled.drawFastHLine(0, 10, 128, W);
 }
 
 void footer(const char* text) {
   oled.setTextSize(1);
-  oled.setCursor(0, 56);
+  oled.setCursor(0, 55);
   oled.print(text);
 }
 
-void showRead() {
-  header("READ MODE");
-  oled.setTextSize(2);
-  oled.setCursor(0, 16);
-  oled.print(lastGear);
-  oled.setTextSize(1);
-  oled.setCursor(0, 36);
-  oled.print(lastUid.length() ? lastUid : "Tap a gear tag");
-  oled.setCursor(0, 46);
-  oled.print(lastStatus);
-  footer("Hold: write mode");
+void drawTick(int x, int y) {
+  oled.drawCircle(x, y, 11, W);
+  for (int d = 0; d < 2; d++) {
+    oled.drawLine(x - 6, y + d, x - 2, y + 4 + d, W);
+    oled.drawLine(x - 2, y + 4 + d, x + 6, y - 4 + d, W);
+  }
+}
+
+void drawCross(int x, int y) {
+  oled.drawCircle(x, y, 11, W);
+  for (int d = 0; d < 2; d++) {
+    oled.drawLine(x - 5 + d, y - 5, x + 5 + d, y + 5, W);
+    oled.drawLine(x + 5 + d, y - 5, x - 5 + d, y + 5, W);
+  }
+}
+
+const char* wifiTag() { return WiFi.status() == WL_CONNECTED ? "WiFi" : "no WiFi"; }
+
+// ------------------------- SCREENS -----------------------------------
+void showReadIdle() {
+  header("READ MODE", wifiTag());
+  centerText("Tap tag", 20, 2);
+  centerText("on the reader", 40, 1);
+  footer("W: write mode");
   oled.display();
 }
 
-void showSelect() {
-  header("SELECT GEAR");
+void showMenu(float holdFrac = 0) {
+  header("WRITE MODE", "R:exit");
   for (uint8_t i = 0; i < GEAR_N; i++) {
-    oled.setCursor(0, 14 + i * 10);
+    int y = 13 + i * 10;
+    if (i == cursor) { oled.fillRect(0, y - 1, 128, 10, W); oled.setTextColor(B); }
+    else             { oled.setTextColor(W); }
+    oled.setTextSize(1);
+    oled.setCursor(4, y);
     oled.print(i == cursor ? "> " : "  ");
     oled.print(GEAR[i]);
+    if (writtenCount[i]) {
+      String c = "x" + String(writtenCount[i]);
+      oled.setCursor(124 - c.length() * 6, y);
+      oled.print(c);
+    }
   }
-  footer("Tap:next  Hold:ok");
+  oled.setTextColor(W);
+  if (holdFrac > 0) {                                   // hold-to-select progress bar
+    oled.drawRect(0, 55, 128, 8, W);
+    oled.fillRect(2, 57, (int)(124 * holdFrac), 4, W);
+  } else {
+    footer("W:next  Hold W:select");
+  }
   oled.display();
 }
 
-void showWrite() {
-  header("WRITE MODE");
+void showWriteWait(const char* note = "") {
+  header("WRITE MODE", "R:exit");
+  centerText("Place tag for", 15, 1);
+  centerText(GEAR[cursor], 27, 2);
+  centerText(note, 45, 1);
+  footer("W: change item");
+  oled.display();
+}
+
+void showBusy(const char* text) {
+  oled.clearDisplay();
+  oled.setTextColor(W);
+  centerText(text, 26, 2);
+  oled.display();
+}
+
+void showResult(bool ok, const char* title, const String& l1, const String& l2) {
+  oled.clearDisplay();
+  oled.setTextColor(W);
+  if (ok) drawTick(12, 20); else drawCross(12, 20);
   oled.setTextSize(2);
-  oled.setCursor(0, 16);
-  oled.print(GEAR[cursor]);
+  oled.setCursor(28, 13);
+  oled.print(title);
   oled.setTextSize(1);
-  oled.setCursor(0, 36);
-  oled.print("Tap tag to write");
-  oled.setCursor(0, 46);
-  oled.print(lastStatus);
-  footer("Hold: cancel");
+  oled.setCursor(0, 40);
+  oled.print(l1);
+  oled.setCursor(0, 52);
+  oled.print(l2);
   oled.display();
 }
 
@@ -156,13 +223,11 @@ String uidToStr(const uint8_t* uid, uint8_t len) {
   return s;
 }
 
-// Reads pages 4..7. Returns false on I/O error.
-// out = gear name, or "BLANK" if the tag has no MS1 record.
+// false = I/O error. out = gear name, or "BLANK" if no MS1 record.
 bool readGear(char* out, size_t n) {
   uint8_t data[16];
-  for (uint8_t p = 0; p < 4; p++) {
+  for (uint8_t p = 0; p < 4; p++)
     if (!nfc.ntag2xx_ReadPage(4 + p, data + p * 4)) return false;
-  }
   if (memcmp(data, TAG_PREFIX, 4) != 0) { strlcpy(out, "BLANK", n); return true; }
   char tmp[13];
   memcpy(tmp, data + 4, 12);
@@ -175,23 +240,20 @@ bool writeGear(const char* gear) {
   uint8_t data[16] = {0};
   memcpy(data, TAG_PREFIX, 4);
   strncpy((char*)data + 4, gear, 12);
-  for (uint8_t p = 0; p < 4; p++) {
+  for (uint8_t p = 0; p < 4; p++)
     if (!nfc.ntag2xx_WritePage(4 + p, data + p * 4)) return false;
-  }
-  char check[16];                                   // read back to verify
-  return readGear(check, sizeof(check)) && strcmp(check, gear) == 0;
+  char check[16];
+  return readGear(check, sizeof(check)) && strcmp(check, gear) == 0;   // verify
 }
 
 // ------------------------- ADMIN LINK --------------------------------
-// Returns the admin's "check" verdict, or "OFFLINE" / "ERR <code>".
+// Returns admin verdict (OK / ISSUED / MISMATCH / UNKNOWN TAG) or OFFLINE / ERR.
 String sendToAdmin(const char* event, const String& uid, const char* gear, const char* prev) {
   if (WiFi.status() != WL_CONNECTED) return "OFFLINE";
-
   char body[200];
   snprintf(body, sizeof(body),
            "{\"station\":\"%s\",\"event\":\"%s\",\"uid\":\"%s\",\"gear\":\"%s\",\"prev\":\"%s\"}",
            STATION_ID, event, uid.c_str(), gear, prev);
-
   HTTPClient http;
   http.setTimeout(2000);
   http.begin(ADMIN_URL);
@@ -199,168 +261,215 @@ String sendToAdmin(const char* event, const String& uid, const char* gear, const
   int code = http.POST(body);
   String resp = (code > 0) ? http.getString() : "";
   http.end();
-
   if (code < 200 || code >= 300) return "ERR " + String(code);
-
-  int k = resp.indexOf("\"check\":\"");               // tiny parse, no JSON lib needed
+  int k = resp.indexOf("\"check\":\"");
   if (k < 0) return "SENT";
   k += 9;
-  int e = resp.indexOf('"', k);
-  return resp.substring(k, e);
+  return resp.substring(k, resp.indexOf('"', k));
 }
 
-// ------------------------- HANDLERS ----------------------------------
-void handleReadTag(const uint8_t* uid, uint8_t len) {
+// ------------------------- MODE CHANGES ------------------------------
+void goRead() {
+  mode = READ_IDLE;
+  showReadIdle();
+}
+
+void enterMenu() {
+  for (uint8_t i = 0; i < GEAR_N; i++) writtenCount[i] = 0;   // new session
+  sessN = 0;
+  cursor = 0;
+  lastTouch = millis();
+  mode = MENU;
+  showMenu();
+}
+
+int findSession(const String& u) {
+  for (uint8_t i = 0; i < sessN; i++) if (sessUid[i] == u) return i;
+  return -1;
+}
+
+// ------------------------- TAG HANDLERS ------------------------------
+void handleRead(const uint8_t* uid, uint8_t len) {
   String u = uidToStr(uid, len);
   if (u == lastSeenUid && millis() - lastSeenAt < SAME_TAG_IGNORE_MS) {
-    lastSeenAt = millis();
-    return;                                         // same tag still on reader
+    lastSeenAt = millis();                 // still sitting on the reader
+    return;
   }
   lastSeenUid = u;
   lastSeenAt  = millis();
-  lastUid     = u;
+  resultAt    = millis();
+  mode        = READ_RESULT;
 
-  if (len != 7) {
-    lastGear = "NOT NTAG";
-    lastStatus = "";
-    showRead();
-    return;
-  }
+  if (len != 7) { showResult(false, "WRONG", "Not an NTAG tag", u); return; }
 
+  showBusy("Reading...");
   char gear[16];
-  if (!readGear(gear, sizeof(gear))) {
-    lastGear = "READ ERR";
-    lastStatus = "Hold tag steady";
-    showRead();
-    return;
-  }
+  if (!readGear(gear, sizeof(gear))) { showResult(false, "FAILED", "Hold tag still", "and try again"); return; }
+  if (strcmp(gear, "BLANK") == 0)    { showResult(false, "BLANK", "Tag not written", "Use W to write it"); return; }
 
-  lastGear   = gear;
-  lastStatus = "Sending...";
-  showRead();
-  lastStatus = "Admin: " + sendToAdmin("scan", u, gear, "");
-  showRead();
+  showBusy("Sending...");
+  String verdict = sendToAdmin("scan", u, gear, "");
+
+  if (verdict == "MISMATCH" || verdict == "UNKNOWN TAG") {
+    showResult(false, "INVALID", String(gear) + " " + u, "Admin: " + verdict);
+  } else {
+    showResult(true, "SUCCESS", String(gear) + " " + u, "Admin: " + verdict);
+  }
 }
 
-void handleWriteTag(const uint8_t* uid, uint8_t len) {
+void handleWrite(const uint8_t* uid, uint8_t len) {
   String u = uidToStr(uid, len);
+  lastTouch = millis();
 
-  if (len != 7) {
-    lastStatus = "Not an NTAG tag";
-    showWrite();
-    delay(800);
+  if (len != 7) { showWriteWait("Not an NTAG tag!"); delay(1000); showWriteWait(); return; }
+
+  int s = findSession(u);                           // written as another item this session?
+  if (s >= 0 && sessGear[s] != cursor) {
+    showWriteWait((String("Tag is ") + GEAR[sessGear[s]] + "!").c_str());
+    delay(1500);
+    showWriteWait();
+    return;
+  }
+  if (s >= 0) {                                     // same tag, same item again
+    showWriteWait("Already done - next tag");
+    delay(1200);
+    showWriteWait();
     return;
   }
 
   char prev[16] = "";
-  readGear(prev, sizeof(prev));                     // what was on it before (for admin log)
+  readGear(prev, sizeof(prev));
 
+  showBusy("Writing...");
   if (!writeGear(GEAR[cursor])) {
-    lastStatus = "Write failed, retry";
-    showWrite();
-    delay(800);
+    showResult(false, "FAILED", "Hold tag still", "and tap again");
+    delay(1500);
+    showWriteWait();
     return;
   }
 
-  lastStatus = "OK! Sending...";
-  showWrite();
-  lastStatus = "Admin: " + sendToAdmin("write", u, GEAR[cursor], prev);
-  showWrite();
-  delay(1200);                                      // let the user see the result
+  showBusy("Sending...");
+  String verdict = sendToAdmin("write", u, GEAR[cursor], prev);
+  showResult(true, "SUCCESS", String(GEAR[cursor]) + " written", "Admin: " + verdict);
+  delay(1500);
 
-  // move on to the next item of the kit
-  lastSeenUid  = u;                                 // so READ mode won't instantly resend it
-  lastSeenAt   = millis();
-  cursor       = (cursor + 1) % GEAR_N;
-  lastStatus   = "";
-  lastActivity = millis();
-  mode = SELECT_MODE;
-  showSelect();
+  writtenCount[cursor]++;
+  if (sessN < SESSION_MAX) { sessUid[sessN] = u; sessGear[sessN] = cursor; sessN++; }
+  lastSeenUid = u;                                  // don't re-read it in READ mode
+  lastSeenAt  = millis();
+
+  // back to the menu, same item still highlighted
+  lastTouch = millis();
+  mode      = MENU;
+  showMenu();
 }
 
 // ------------------------- SETUP / LOOP ------------------------------
 void setup() {
   Serial.begin(115200);
-  pinMode(BTN_PIN, INPUT_PULLUP);
+  pinMode(BTN_READ, INPUT_PULLUP);
+  pinMode(BTN_WRITE, INPUT_PULLUP);
 
-  if (!oled.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
-    Serial.println("OLED not found");
-  }
-  header("BOOTING");
-  oled.setCursor(0, 16);
-  oled.print("Starting NFC...");
+  if (!oled.begin(SSD1306_SWITCHCAPVCC, 0x3C)) Serial.println("OLED not found");
+  oled.clearDisplay();
+  oled.setTextColor(W);
+  centerText("MINER SAFETY", 10, 1);
+  centerText("Entry Station", 22, 1);
+  centerText("Starting NFC...", 44, 1);
   oled.display();
 
-  nfc.begin();
-  uint32_t ver = nfc.getFirmwareVersion();
-  if (!ver) {
-    header("ERROR");
-    oled.setCursor(0, 16);
-    oled.print("PN532 not found.\nCheck wiring and\nDIP switch (I2C).");
+  // PN532 often misses the first wake-up over I2C (no reset wire) -> retry
+  uint32_t fw = 0;
+  for (uint8_t attempt = 0; attempt < 6 && !fw; attempt++) {
+    nfc.begin();
+    delay(100);
+    fw = nfc.getFirmwareVersion();
+    if (!fw) delay(400);
+  }
+  if (!fw) {
+    // scan the I2C bus so we can see what is actually connected
+    String found = "";
+    bool pnSeen = false;
+    for (uint8_t a = 1; a < 127; a++) {
+      Wire.beginTransmission(a);
+      if (Wire.endTransmission() == 0) {
+        char b[5];
+        sprintf(b, "%02X ", a);
+        found += b;
+        if (a == 0x24) pnSeen = true;
+      }
+    }
+    Serial.println("I2C devices: " + found);
+    oled.clearDisplay();
+    drawCross(12, 20);
+    oled.setTextSize(1);
+    oled.setCursor(28, 16); oled.print("PN532 not found");
+    oled.setCursor(0, 36);  oled.print("I2C: "); oled.print(found);
+    oled.setCursor(0, 48);
+    oled.print(pnSeen ? "24 ok, no reply-replug" : "No 24: wires/DIP/power");
     oled.display();
     while (1) delay(10);
   }
   nfc.SAMConfig();
 
+  oled.fillRect(0, 44, 128, 10, B);
+  centerText("Connecting WiFi...", 44, 1);
+  oled.display();
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
-  oled.setCursor(0, 28);
-  oled.print("Connecting WiFi...");
-  oled.display();
   unsigned long t0 = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - t0 < 10000) delay(200);
   Serial.println(WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "WiFi offline");
 
-  showRead();
+  goRead();
 }
 
 void loop() {
-  BtnEvent ev = pollButton();
+  BtnEvent r = poll(btnR);
+  BtnEvent w = poll(btnW);
   uint8_t uid[7];
   uint8_t len = 0;
 
+  // READ button works from anywhere
+  if (r != BTN_NONE) {
+    if (mode != READ_IDLE) goRead();
+    return;
+  }
+
   switch (mode) {
-    case READ_MODE:
-      if (ev == BTN_LONG) {
-        mode = SELECT_MODE;
-        cursor = 0;
-        lastActivity = millis();
-        showSelect();
-        return;
-      }
-      // short timeout keeps the button responsive
-      if (nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &len, 50)) {
-        handleReadTag(uid, len);
-      }
+    case READ_IDLE:
+    case READ_RESULT:
+      if (w != BTN_NONE) { enterMenu(); return; }
+      if (mode == READ_RESULT && millis() - resultAt > RESULT_MS) goRead();
+      if (nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &len, 50)) handleRead(uid, len);
       break;
 
-    case SELECT_MODE:
-      if (ev == BTN_SHORT) {
+    case MENU: {
+      static unsigned long lastBarDraw = 0;
+      if (w == BTN_SHORT) {
         cursor = (cursor + 1) % GEAR_N;
-        lastActivity = millis();
-        showSelect();
-      } else if (ev == BTN_LONG) {
-        mode = WRITE_MODE;
-        lastStatus = "";
-        lastActivity = millis();
-        showWrite();
-      } else if (millis() - lastActivity > SELECT_TIMEOUT_MS) {
-        mode = READ_MODE;
-        showRead();
+        lastTouch = millis();
+        showMenu();
+      } else if (w == BTN_LONG) {
+        lastTouch = millis();
+        mode = WRITE_WAIT;
+        showWriteWait();
+      } else if (btnW.down && !btnW.longFired) {
+        if (millis() - lastBarDraw > 40) {           // animate hold bar
+          lastBarDraw = millis();
+          showMenu((millis() - btnW.pressedAt) / (float)LONG_MS);
+        }
+      } else if (millis() - lastTouch > IDLE_TIMEOUT_MS) {
+        goRead();
       }
       break;
+    }
 
-    case WRITE_MODE:
-      if (ev == BTN_LONG || millis() - lastActivity > SELECT_TIMEOUT_MS) {
-        mode = READ_MODE;
-        lastStatus = "";
-        showRead();
-        return;
-      }
-      if (nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &len, 50)) {
-        handleWriteTag(uid, len);
-      }
+    case WRITE_WAIT:
+      if (w == BTN_SHORT) { lastTouch = millis(); mode = MENU; showMenu(); return; }
+      if (millis() - lastTouch > IDLE_TIMEOUT_MS) { goRead(); return; }
+      if (nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &len, 50)) handleWrite(uid, len);
       break;
   }
 }
