@@ -57,6 +57,8 @@ const char* BODY_ID = "BODY-01";      // must match the "Body ESP code" on the a
 // 1 = no MPU / BMP / heart-rate; the hub shows the temperature and gives no motion-sensor warning.
 #define MOCK_TEMP_ONLY       0
 #define DS18B20_PIN_CUSTOM   -1       // -1 = default pin below; or a GPIO number, e.g. 10 for the ESP32-C6 DevKit
+#define I2C_SDA_CUSTOM       -1       // -1 = default pins below; or GPIO numbers for other boards,
+#define I2C_SCL_CUSTOM       -1       //   e.g. ESP32-C6-WROOM-1 DevKit: SDA 6, SCL 7
 
 #define USE_EXTERNAL_ANTENNA 0        // XIAO ESP32-C6 only: 1 = antenna on the u.FL socket (fit it first!)
 
@@ -74,6 +76,12 @@ const char* BODY_ID = "BODY-01";      // must match the "Body ESP code" on the a
   #define PULSE_PIN    4              // HW-827 analog (ADC1)
   #define BUTTON_PIN   5
   #define LED_PIN      6
+#endif
+#if I2C_SDA_CUSTOM >= 0 && I2C_SCL_CUSTOM >= 0
+  #undef  I2C_SDA
+  #undef  I2C_SCL
+  #define I2C_SDA  I2C_SDA_CUSTOM
+  #define I2C_SCL  I2C_SCL_CUSTOM
 #endif
 #if DS18B20_PIN_CUSTOM >= 0
   #undef  DS18B20_PIN
