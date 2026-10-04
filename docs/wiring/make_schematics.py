@@ -166,7 +166,7 @@ def body():
     P = mcu(s, 190, 150, 260, 600, "ESP32-S3 DevKit", "or Seeed XIAO ESP32-C6",
             left=[(110, "3V3"), (200, "5V (USB)"), (540, "GND")],
             right=[(130, "GPIO8 / D4  SDA"), (170, "GPIO9 / D5  SCL"), (300, "GPIO7 / D3"),
-                   (380, "GPIO1 / D0  ADC"), (460, "GPIO5 / D8"), (530, "GPIO4 / D10")])
+                   (380, "GPIO4 / D0  ADC"), (460, "GPIO5 / D8"), (530, "GPIO6 / D10")])
     # power at the board
     x3, y3 = P["3V3"]; s.wire([(x3, y3), (x3 - 30, y3), (x3 - 30, y3 - 30)], "3V3"); s.vcc(x3 - 30, y3 - 30)
     x5, y5 = P["5V (USB)"]; s.wire([(x5, y5), (x5 - 30, y5)], "5V"); s.text(x5 - 34, y5 + 22, "USB / power bank", 11, MUTED, "end")
@@ -214,10 +214,10 @@ def body():
     s.wire([(1040, y7 + 20), (1080, y7 + 20)], "GND"); s.gnd(1080, y7 + 20)
 
     # HW-827 pulse sensor (backup)
-    y1 = P["GPIO1 / D0  ADC"][1]
+    y1 = P["GPIO4 / D0  ADC"][1]
     s.box(1140, y1 - 55, 200, 110, "HW-827 pulse", "analog backup for HR", dash=True)
     s.pin(1140, y1, "S", "l"); s.pin(1210, y1 - 55, "+", "t"); s.pin(1270, y1 + 55, "−", "b")
-    s.wire([P["GPIO1 / D0  ADC"], (1140, y1)], "ANA")
+    s.wire([P["GPIO4 / D0  ADC"], (1140, y1)], "ANA")
     s.wire([(1210, y1 - 55), (1210, y1 - 75)], "3V3"); s.vcc(1210, y1 - 75)
     s.wire([(1270, y1 + 55), (1270, y1 + 67)], "GND"); s.gnd(1270, y1 + 67)
 
@@ -229,8 +229,8 @@ def body():
     s.text(500, y5b + 22, "INPUT_PULLUP (no resistor)", 11, MUTED)
 
     # LED
-    y4 = P["GPIO4 / D10"][1]
-    end = s.resistor(P["GPIO4 / D10"][0], y4, 170, False, "220 Ω", "SIG")
+    y4 = P["GPIO6 / D10"][1]
+    end = s.resistor(P["GPIO6 / D10"][0], y4, 170, False, "220 Ω", "SIG")
     e2 = s.led(end[0], y4, "Alert LED (red)")
     s.wire([e2, (e2[0] + 40, y4), (e2[0] + 40, y4 + 14)], "GND"); s.gnd(e2[0] + 40, y4 + 14)
 

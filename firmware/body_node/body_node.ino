@@ -22,11 +22,11 @@
 //    DS18B20  red  -> 3V3,  black -> GND,  yellow/white (data) -> pin below
 //             + 4.7k resistor between data and 3V3 (needed!)
 //                                 GPIO7           D3
-//    HW-827   +  -> 3V3,  -  -> GND,  S ->     GPIO1           D0
+//    HW-827   +  -> 3V3,  -  -> GND,  S ->     GPIO4           D0
 //    SOS button  one leg -> pin, other leg -> GND
 //                                 GPIO5           D8
 //    Red LED (+) via 220 ohm -> pin, LED (-) -> GND
-//                                 GPIO4           D10
+//                                 GPIO6           D10
 //
 //  WEAR IT: chest strap / belt, upright, then switch on and stand still for 3 s while
 //  the red LED is on (the gyro learns its zero). The worker starts at the hub on the map.
@@ -65,9 +65,9 @@ const char* BODY_ID = "BODY-01";      // must match the "Body ESP code" on the a
   #define I2C_SDA      8
   #define I2C_SCL      9
   #define DS18B20_PIN  7
-  #define PULSE_PIN    1
+  #define PULSE_PIN    4              // HW-827 analog (ADC1)
   #define BUTTON_PIN   5
-  #define LED_PIN      4
+  #define LED_PIN      6
 #endif
 #define USE_HW827          1          // 1 = use the HW-827 analog pulse sensor when no MAX3010x is found
 

@@ -16,9 +16,9 @@ Schematics are generated from `docs/wiring/make_schematics.py` (run it after cha
 | I2C SCL — same three | GPIO9 | D5 |
 | Sensor VCC/VIN, GND | 3V3, GND | 3V3, GND |
 | DS18B20 data (red → 3V3, black → GND) + **4.7 kΩ data → 3V3** | GPIO7 | D3 |
-| HW-827 pulse sensor S (+ → 3V3, − → GND) | GPIO1 | D0 |
+| HW-827 pulse sensor S (+ → 3V3, − → GND) | GPIO4 | D0 |
 | SOS button (other leg → GND) | GPIO5 | D8 |
-| Red LED via 220 Ω (LED − → GND) | GPIO4 | D10 |
+| Red LED via 220 Ω (LED − → GND) | GPIO6 | D10 |
 
 I2C addresses: MPU6050 `0x68`, BMP180 `0x77`, MAX30100/30102 `0x57`.
 The green MAX3010x board pulls its I2C lines to 1.8 V; sharing the bus with the GY-521 (3.3 V pull-ups) usually makes it read reliably.
