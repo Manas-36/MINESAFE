@@ -59,6 +59,8 @@ const char* BODY_ID = "BODY-01";      // must match the "Body ESP code" on the a
 #define DS18B20_PIN_CUSTOM   -1       // -1 = default pin below; or a GPIO number, e.g. 10 for the ESP32-C6 DevKit
 #define I2C_SDA_CUSTOM       -1       // -1 = default pins below; or GPIO numbers for other boards,
 #define I2C_SCL_CUSTOM       -1       //   e.g. ESP32-C6-WROOM-1 DevKit: SDA 6, SCL 7
+#define PULSE_PIN_CUSTOM     -1       // -1 = default; HW-827 S pin. MUST be an analog pin:
+                                      //   ESP32-C6 GPIO0-6, ESP32-S3 GPIO1-10. Also used with MOCK_MPU_ONLY.
 
 #define USE_EXTERNAL_ANTENNA 0        // XIAO ESP32-C6 only: 1 = antenna on the u.FL socket (fit it first!)
 
@@ -82,6 +84,16 @@ const char* BODY_ID = "BODY-01";      // must match the "Body ESP code" on the a
   #undef  I2C_SCL
   #define I2C_SDA  I2C_SDA_CUSTOM
   #define I2C_SCL  I2C_SCL_CUSTOM
+#endif
+#if PULSE_PIN_CUSTOM >= 0
+  #undef  PULSE_PIN
+  #define PULSE_PIN  PULSE_PIN_CUSTOM
+  #if CONFIG_IDF_TARGET_ESP32C6 && PULSE_PIN_CUSTOM > 6
+    #error "PULSE_PIN_CUSTOM: on the ESP32-C6 only GPIO0-6 can read analog (use e.g. 2)"
+  #endif
+  #if CONFIG_IDF_TARGET_ESP32S3 && (PULSE_PIN_CUSTOM < 1 || PULSE_PIN_CUSTOM > 10)
+    #error "PULSE_PIN_CUSTOM: on the ESP32-S3 use GPIO1-10 (ADC1, works with the radio on)"
+  #endif
 #endif
 #if DS18B20_PIN_CUSTOM >= 0
   #undef  DS18B20_PIN
@@ -812,7 +824,13 @@ void setup() {
 #endif
 #if MOCK_TEMP_ONLY
 #elif MOCK_MPU_ONLY
-  Serial.println("  MOCK body unit: MPU6050 only (no BMP180 / DS18B20 / heart-rate)");
+  Serial.println("  MOCK body unit: MPU6050 only (no BMP180 / DS18B20)");
+#if PULSE_PIN_CUSTOM >= 0
+  analogSetPinAttenuation(PULSE_PIN, ADC_11db);
+  pulseAnalog = true;
+  beat.sign = 1; beat.minAmp = 25;
+  Serial.printf("  + heart rate from HW-827 on GPIO%d\n", PULSE_PIN);
+#endif
 #else
   bmpOk = bmpFound = bmpBegin();
   if (!bmpOk) Serial.println("  BMP180 NOT found -> no height");
