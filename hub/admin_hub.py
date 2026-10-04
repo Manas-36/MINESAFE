@@ -77,6 +77,7 @@ F_FALL, F_NOMOTION, F_IMPACT, F_SOS, F_MPU_FAULT, F_TEMP_FAULT, F_ALERT_LED = (
     1, 2, 4, 8, 16, 32, 64)
 NONE16 = 0x7FFF                        # "no value" for heading / height
 F_TEST = 128                           # packet made by a repeater's phone test page
+F_NO_VITALS = 256                      # mock body unit: MPU only, no temp / heart-rate sensors
 FLAG_NAMES = {F_FALL: "Fall detected", F_NOMOTION: "No movement",
               F_IMPACT: "Hard impact", F_SOS: "SOS pressed",
               F_MPU_FAULT: "Motion sensor fault", F_TEMP_FAULT: "Temp sensor fault",
@@ -429,31 +430,66 @@ def phone():
     return render_template_string(PHONE, scans=pending_scans, msg=request.args.get("msg"))
 
 
-@app.post("/api/photo")
-def photo():
-    f = request.files.get("photo")
-    if not f:
-        return "no photo", 400
-    name = f"{datetime.now():%Y%m%d_%H%M%S}_{uuid.uuid4().hex[:6]}.jpg"
-    f.save(os.path.join(PHOTO_DIR, name))
-    res = detect_kit(os.path.join(PHOTO_DIR, name)) if ai["state"] == "ready" else None
-    bid = request.form.get("body_id", "").strip().upper()
+def ingest_photo(path, name, bid, wid, source):
+    """Store an entry photo as a verification card (+ AI kit check). Returns the AI result."""
+    res = detect_kit(path) if ai["state"] == "ready" else None
     with lock:
+        vid = uuid.uuid4().hex[:8]
         verifications.insert(0, {
-            "id": uuid.uuid4().hex[:8], "time": clock(), "photo": name, "body_id": bid,
-            "worker_id": request.form.get("worker_id", "").strip(),
+            "id": vid, "time": clock(), "photo": name, "body_id": bid, "worker_id": wid,
             "scans": list(pending_scans), "status": "PENDING", "worker": "", "gear_ok": [], "ai": res,
+            "source": source,
         })
         del verifications[50:]
         pending_scans.clear()
         if res and res.get("ok"):
             kitchecks.insert(0, {"id": uuid.uuid4().hex[:8], "time": clock(), "photo": name,
-                                 "body_id": bid, "source": "Entry phone", "result": res})
+                                 "body_id": bid, "source": source, "result": res})
             del kitchecks[40:]
+    return vid, res
+
+
+def photo_name():
+    return f"{datetime.now():%Y%m%d_%H%M%S}_{uuid.uuid4().hex[:6]}.jpg"
+
+
+@app.post("/api/photo")
+def photo():
+    f = request.files.get("photo")
+    if not f:
+        return "no photo", 400
+    name = photo_name()
+    f.save(os.path.join(PHOTO_DIR, name))
+    _, res = ingest_photo(os.path.join(PHOTO_DIR, name), name,
+                          request.form.get("body_id", "").strip().upper(),
+                          request.form.get("worker_id", "").strip(), "Entry phone")
     msg = "Sent! Waiting for admin approval."
     if res and res.get("ok"):
         msg = f"Sent! AI check: {res['verdict']} ({ai_summary(res)})"
     return redirect("/phone?msg=" + urllib.parse.quote(msg))
+
+
+@app.post("/api/camphoto")
+def camphoto():
+    """Entry station camera (XIAO ESP32-S3 Sense): raw JPEG body, station / body in headers or query."""
+    data = request.get_data()
+    if len(data) < 1000 or data[:2] != b"\xff\xd8":
+        return jsonify(ok=False, error="not a JPEG"), 400
+    station = request.headers.get("X-Station") or request.args.get("station", "ENTRY")
+    bid = (request.headers.get("X-Body") or request.args.get("body_id", "")).strip().upper()
+    name = photo_name()
+    with open(os.path.join(PHOTO_DIR, name), "wb") as fh:
+        fh.write(data)
+    with lock:
+        nscans = len(pending_scans)
+    vid, res = ingest_photo(os.path.join(PHOTO_DIR, name), name, bid, "", f"Camera {station}")
+    out = {"ok": True, "id": vid, "scans": nscans, "ai": "OFF", "detail": "admin will check"}
+    if res and res.get("ok"):
+        out["ai"] = res.get("verdict", "?")
+        out["detail"] = ai_summary(res)
+    elif res:
+        out["ai"] = "ERR"
+    return jsonify(out)
 
 
 @app.get("/photos/<path:fn>")
@@ -602,7 +638,7 @@ def ingest(p, rep, now):
                    "hr": int(p.get("hr", 0)) or None, "spo2": int(p.get("sp", 0)) or None}
     update_position(bid, latest[bid], now)
     h = history.setdefault(bid, deque(maxlen=900))
-    h.append((round(now, 2), None if fl & F_TEMP_FAULT else temp,
+    h.append((round(now, 2), None if fl & (F_TEMP_FAULT | F_NO_VITALS) else temp,
               None if fl & F_MPU_FAULT else amag, None if fl & F_MPU_FAULT else gmag, latest[bid]["hr"]))
 
 
@@ -725,7 +761,9 @@ def evaluate(bid, now):
         bump(1, "Hard impact")
     if fl & F_MPU_FAULT:
         bump(1, "Motion sensor not responding")
-    if fl & F_TEMP_FAULT:
+    if fl & F_NO_VITALS:
+        pass                                   # mock unit (motion only): nothing to check
+    elif fl & F_TEMP_FAULT:
         bump(1, "Temperature sensor not responding")
     else:
         t = L["temp"]
@@ -1310,7 +1348,7 @@ def live_view(bid, now):
         return None
     si = seqinfo.get(bid, {"rx": 0, "lost": 0})
     total = si["rx"] + si["lost"]
-    return {"temp": L["temp"], "amb": L["amb"], "amag": L["amag"], "gmag": L["gmag"],
+    return {"temp": None if L["fl"] & (F_TEMP_FAULT | F_NO_VITALS) else L["temp"], "amb": L["amb"], "mock": bool(L["fl"] & F_NO_VITALS), "amag": L["amag"], "gmag": L["gmag"],
             "ax": L["ax"], "ay": L["ay"], "az": L["az"], "gx": L["gx"], "gy": L["gy"], "gz": L["gz"],
             "age": round(now - L["time"], 1), "seq": L["seq"], "rssi": L["rssi"],
             "repeater": L["repeater"], "heard_by": L["heard_by"], "fl": L["fl"],

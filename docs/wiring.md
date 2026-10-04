@@ -35,16 +35,21 @@ The green MAX3010x board pulls its I2C lines to 1.8 V; sharing the bus with the 
 
 The 10 k / 20 k divider keeps the 0–5 V MQ output safe for the 3.3 V pin; the code multiplies by 1.5 to undo it.
 
-## Entry station (XIAO ESP32-C6)
+## Mock body unit (ESP32-C6 + MPU6050)
+An extra worker for the map demo. Flash `body_node` with `BODY_ID "BODY-02"` and `MOCK_MPU_ONLY 1`; only the MPU6050 is wired (same pins as the body unit's C6 column: SDA GPIO22 / D4, SCL GPIO23 / D5, VCC 3V3, GND). Button (GPIO19) and LED (GPIO18) are optional. The hub shows it as a motion-only worker — no temperature or heart-rate warnings.
+
+## Entry station (XIAO ESP32-S3 Sense)
 
 ![Entry station schematic](wiring/entry_station.svg)
 
-| Connection | Pin |
-|---|---|
-| PN532 + SSD1306 OLED SDA | D4 |
-| PN532 + OLED SCL | D5 |
-| READ button (→ GND) | D1 |
-| WRITE button (→ GND) | D0 |
-| VCC / GND | 3V3 / GND |
+| Connection | XIAO S3 Sense | (XIAO C6, no camera) |
+|---|---|---|
+| PN532 + SSD1306 OLED SDA | D4 (GPIO5) | D4 |
+| PN532 + OLED SCL | D5 (GPIO6) | D5 |
+| READ button (→ GND) | D1 (GPIO2) | D1 |
+| WRITE button (→ GND) | D0 (GPIO1) | D0 |
+| **PHOTO button (→ GND)** | **D3 (GPIO4)** | D3 |
+| Camera | Sense expansion board (B2B connector) | — |
+| VCC / GND | 3V3 / GND | 3V3 / GND |
 
-Libraries: Adafruit PN532, Adafruit SSD1306, Adafruit GFX. PN532 DIP switches set to I2C.
+Arduino: board **XIAO_ESP32S3**, **PSRAM: OPI PSRAM**. Libraries: Adafruit PN532, Adafruit SSD1306, Adafruit GFX. PN532 DIP switches set to I2C. The camera uses its own I²C bus (GPIO39/40, port 1), so it does not clash with the PN532 / OLED bus.

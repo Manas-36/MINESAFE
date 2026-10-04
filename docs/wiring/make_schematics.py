@@ -298,17 +298,17 @@ def repeater():
 
 # ============================================================ entry station
 def entry():
-    s = Sheet(1300, 760, "Entry station — wiring schematic",
-              "Gear-tag gate · Seeed XIAO ESP32-C6 + PN532 (I²C mode) + SSD1306 OLED · NTAG215 tags on helmet, vest, pants, shoes")
-    P = mcu(s, 150, 140, 240, 440, "XIAO ESP32-C6", "entry station",
-            left=[(110, "3V3"), (380, "GND")],
-            right=[(130, "D4  SDA"), (170, "D5  SCL"), (300, "D1"), (370, "D0")])
+    s = Sheet(1300, 780, "Entry station — wiring schematic",
+              "Gear-tag gate · Seeed XIAO ESP32-S3 Sense (camera) + PN532 (I²C) + SSD1306 OLED + 3 buttons · NTAG215 tags on helmet, vest, pants, shoes")
+    P = mcu(s, 150, 140, 260, 470, "XIAO ESP32-S3 Sense", "entry station + camera",
+            left=[(110, "3V3"), (420, "GND")],
+            right=[(130, "D4 GPIO5  SDA"), (170, "D5 GPIO6  SCL"), (250, "B2B camera"), (310, "D1 GPIO2"), (370, "D0 GPIO1"), (430, "D3 GPIO4")])
     x3, y3 = P["3V3"]; s.wire([(x3, y3), (x3 - 30, y3), (x3 - 30, y3 - 30)], "3V3"); s.vcc(x3 - 30, y3 - 30)
     xg, yg = P["GND"]; s.wire([(xg, yg), (xg - 30, yg), (xg - 30, yg + 20)], "GND"); s.gnd(xg - 30, yg + 20)
-    sda_y, scl_y = P["D4  SDA"][1], P["D5  SCL"][1]
-    s.wire([P["D4  SDA"], (1060, sda_y)], "SDA", 3); s.wire([P["D5  SCL"], (1060, scl_y)], "SCL", 3)
-    s.text(440, scl_y + 22, "I²C bus", 12, MUTED, weight=600)
-    for mx, t, sub in ((500, "PN532 NFC", "DIP: SEL0=1 SEL1=0 → I²C · 0x24"), (810, "SSD1306 OLED", "0.96\" 128×64 · 0x3C")):
+    sda_y, scl_y = P["D4 GPIO5  SDA"][1], P["D5 GPIO6  SCL"][1]
+    s.wire([P["D4 GPIO5  SDA"], (1060, sda_y)], "SDA", 3); s.wire([P["D5 GPIO6  SCL"], (1060, scl_y)], "SCL", 3)
+    s.text(460, scl_y + 22, "I²C bus (Wire, port 0)", 12, MUTED, weight=600)
+    for mx, t, sub in ((520, "PN532 NFC", "DIP: SEL0=1 SEL1=0 → I²C · 0x24"), (820, "SSD1306 OLED", "0.96\" 128×64 · 0x3C")):
         my, mw, mh = 138, 230, 96
         s.box(mx, my, mw, mh, t, sub)
         pv, pg, pc, pd = mx + 30, mx + 80, mx + 140, mx + 190
@@ -321,17 +321,22 @@ def entry():
         s.wire([(pg, yb), (pg, yb + 9), (mx + mw + 12, yb + 9), (mx + mw + 12, my - 4)], "GND")
         s.o.append(f'<line x1="{mx+mw+12}" y1="{my-4}" x2="{mx+mw+12}" y2="{my-18}" stroke="{NET["GND"]}" stroke-width="2.4"/>')
         s.text(mx + mw + 12, my - 24, "GND", 11, NET["GND"], "middle", 700)
-    for lab, name in (("D1", "READ button"), ("D0", "WRITE button")):
+    # camera on the Sense expansion board
+    cx, cy = P["B2B camera"]
+    s.box(820, cy - 40, 260, 80, "OV2640 / OV3660 camera", "Sense board · own I²C on GPIO39/40 (port 1)")
+    s.wire([(cx, cy), (820, cy)], "RF", 3, dash=True)
+    s.text(620, cy - 10, "board-to-board connector, no wires", 11.5, MUTED, "middle", 600)
+    for lab, name in (("D1 GPIO2", "READ button"), ("D0 GPIO1", "WRITE button"), ("D3 GPIO4", "PHOTO button")):
         x, y = P[lab]
         s.wire([(x, y), (560, y)], "SIG")
         e = s.button(560, y, name)
         s.wire([e, (680, y), (680, y + 14)], "GND"); s.gnd(680, y + 14)
-    s.text(440, P["D0"][1] + 40, "INPUT_PULLUP on both buttons", 11, MUTED)
-    s.box(860, 420, 230, 90, "NTAG215 tags ×4", "helmet · vest · pants · shoes", fill="#fff", dash=True)
-    s.o.append(f'<path d="M742,190 C900,190 975,300 975,420" fill="none" stroke="{MUTED}" stroke-width="1.6" stroke-dasharray="4 4"/>')
-    s.text(985, 380, "13.56 MHz, ~3 cm", 11.5, MUTED, "start", 600)
-    s.note(150, 620, ["Wi-Fi to the hub: credentials in secrets.h (not in git) · libraries: Adafruit PN532, SSD1306, GFX"], 900)
-    s.legend(150, 720, [("3V3", "3.3 V"), ("GND", "Ground"), ("SDA", "I²C SDA"), ("SCL", "I²C SCL"), ("SIG", "Button")])
+    s.text(460, P["D3 GPIO4"][1] + 40, "INPUT_PULLUP on all buttons", 11, MUTED)
+    s.box(860, 450, 260, 80, "NTAG215 tags ×4", "helmet · vest · pants · shoes", fill="#fff", dash=True)
+    s.text(990, 552, "tapped on the PN532 · 13.56 MHz · ~3 cm", 11.5, MUTED, "middle", 600)
+    s.note(150, 650, ["PSRAM: OPI (Tools menu) · photo SVGA JPEG → POST /api/camphoto · scans → POST /api/gear",
+                      "Wi-Fi credentials in secrets.h (not in git) · hub auto-found on the hotspot subnet · libs: Adafruit PN532, SSD1306, GFX"], 1000)
+    s.legend(150, 750, [("3V3", "3.3 V"), ("GND", "Ground"), ("SDA", "I²C SDA"), ("SCL", "I²C SCL"), ("SIG", "Button"), ("RF", "Camera connector")])
     s.save("entry_station.svg")
 
 
@@ -345,12 +350,12 @@ def system():
             s.text(x + w / 2, y + h / 2 + 16, sub, 11.5, AMBER, "middle", 600)
         else:
             s.box(x, y, w, h, t, sub)
-    unit(60, 300, 200, 90, "Body unit", "ESP32 + 4 sensors, LED, SOS")
-    unit(360, 300, 180, 90, "REP-03", "tunnel · 2 hops")
-    unit(640, 300, 180, 90, "REP-02", "tunnel · 1 hop")
-    unit(920, 300, 200, 90, "REP-01 (main)", "hop 0 · joins Wi-Fi")
+    unit(60, 300, 200, 90, "Body units", "S3 (sensors) · C6 mock · phone")
+    unit(360, 300, 180, 90, "REP-03", "XIAO C6 · 2 hops")
+    unit(640, 300, 180, 90, "REP-02", "XIAO C6 · 1 hop")
+    unit(920, 300, 200, 90, "REP-01 (main)", "XIAO C6 · Wi-Fi to hub")
     unit(1220, 300, 230, 90, "Admin hub", "laptop · Flask · AI · map", dark=True)
-    unit(1220, 120, 230, 80, "Entry station", "XIAO C6 + PN532 + OLED")
+    unit(1220, 120, 230, 80, "Entry station", "XIAO S3 Sense · RFID + camera")
     unit(1220, 480, 230, 80, "Phone camera", "entry photo · test worker")
     for a, b in ((260, 360), (540, 640), (820, 920)):
         s.wire([(a, 330), (b, 330)], "SDA", 3); s.wire([(b, 360), (a, 360)], "ANA", 2.4, dash=True)

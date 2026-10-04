@@ -5,12 +5,12 @@
 **Week-by-week progress of the capstone — from research to final review**
 
 ![Progress](https://img.shields.io/badge/progress-71%25-F2A900?style=for-the-badge)
-![Done](https://img.shields.io/badge/done-40-2ea44f?style=for-the-badge)
+![Done](https://img.shields.io/badge/done-42-2ea44f?style=for-the-badge)
 ![In progress](https://img.shields.io/badge/in_progress-0-fb8c00?style=for-the-badge)
-![To do](https://img.shields.io/badge/to_do-16-6e7781?style=for-the-badge)
+![To do](https://img.shields.io/badge/to_do-17-6e7781?style=for-the-badge)
 ![Week](https://img.shields.io/badge/now-week_9_of_14-1f6feb?style=for-the-badge)
 
-`█████████████████████░░░░░░░░░`  **40 / 56 tasks**
+`█████████████████████░░░░░░░░░`  **42 / 59 tasks**
 
 </div>
 
@@ -31,11 +31,11 @@
 | ✅ | 07 | 14 Sep – 20 Sep | 🔗 Multi-hop chain + alert propagation | `v0.4` | `██████████` 3/3 |
 | ✅ | 08 | 21 Sep – 27 Sep | 🎯 First end-to-end run | `v0.5` | `██████████` 4/4 |
 | ✅ | **09** ◀ now | 28 Sep – 4 Oct | 🗺️ Map tracking, gas analysis, real sensors, docs | `v0.6 / v1.0` | `██████████` 13/13 |
-| ⏳ | 10 | 5 Oct – 11 Oct | 🧪 Body unit bench test + calibration | `v1.1` | `░░░░░░░░░░` 0/4 |
+| 🔄 | 10 | 5 Oct – 11 Oct | 🧪 Body unit bench test + calibration | `v1.1` | `███░░░░░░░` 2/6 |
 | ⏳ | 11 | 12 Oct – 18 Oct | 🤖 AI kit dataset + entry flow + kit-removal | `v1.2` | `░░░░░░░░░░` 0/3 |
 | ⏳ | 12 | 19 Oct – 25 Oct | 🔋 Power, enclosure, range test | `v1.3` | `░░░░░░░░░░` 0/3 |
 | ⏳ | 13 | 26 Oct – 1 Nov | 🎬 Full system trial + demo video | `v1.4` | `░░░░░░░░░░` 0/3 |
-| ⏳ | 14 | 2 Nov – 8 Nov | 🏁 Report, final review, release | `v2.0` | `░░░░░░░░░░` 0/3 |
+| ⏳ | 14 | 2 Nov – 8 Nov | 🏁 Report, final review, release | `v2.0` | `░░░░░░░░░░` 0/4 |
 
 ## 🗓️ Timeline
 
@@ -164,8 +164,10 @@ gantt
 </details>
 
 <details open>
-<summary>🧪 <b>Week 10</b> · 5 Oct – 11 Oct · Body unit bench test + calibration · <code>v1.1</code> · 0/4</summary>
+<summary>🧪 <b>Week 10</b> · 5 Oct – 11 Oct · Body unit bench test + calibration · <code>v1.1</code> · 2/6</summary>
 
+- [x] Entry station v3: XIAO S3 Sense camera + PHOTO button + /api/camphoto — <sub>Entry station</sub>
+- [x] Mock worker: ESP32-C6 + MPU6050 (MOCK_MPU_ONLY) — <sub>Body unit</sub>
 - [ ] Flash body unit v2 and bench-test every sensor — <sub>Body unit</sub> 🔴
 - [ ] Calibrate step length and heading on a measured corridor — <sub>Location & map</sub> 🔴
 - [ ] Validate fall / no-movement detection with test drops — <sub>Body unit</sub> 🔴
@@ -201,11 +203,12 @@ gantt
 </details>
 
 <details>
-<summary>🏁 <b>Week 14</b> · 2 Nov – 8 Nov · Report, final review, release · <code>v2.0</code> · 0/3</summary>
+<summary>🏁 <b>Week 14</b> · 2 Nov – 8 Nov · Report, final review, release · <code>v2.0</code> · 0/4</summary>
 
 - [ ] Write project report — <sub>Docs & review</sub> 🔴
 - [ ] Final presentation rehearsal and viva questions — <sub>Docs & review</sub> 🔴
 - [ ] Release v2.0 on GitHub — <sub>Docs & review</sub>
+- [ ] Plan Zigbee (802.15.4) migration on ESP32-C6 nodes — <sub>Network</sub>
 
 </details>
 
@@ -217,12 +220,12 @@ gantt
 |---|:-:|:-:|---|
 | Research | 6 | 0 | `██████████` 100 % |
 | Hardware | 2 | 3 | `████░░░░░░` 40 % |
-| Entry station | 3 | 1 | `████████░░` 75 % |
+| Entry station | 4 | 1 | `████████░░` 80 % |
 | Control room | 7 | 1 | `█████████░` 88 % |
 | Testing | 3 | 2 | `██████░░░░` 60 % |
-| Network | 6 | 1 | `█████████░` 86 % |
+| Network | 6 | 2 | `████████░░` 75 % |
 | Gas | 2 | 0 | `██████████` 100 % |
-| Body unit | 3 | 3 | `█████░░░░░` 50 % |
+| Body unit | 4 | 3 | `██████░░░░` 57 % |
 | Location & map | 2 | 1 | `███████░░░` 67 % |
 | Docs & review | 6 | 4 | `██████░░░░` 60 % |
 

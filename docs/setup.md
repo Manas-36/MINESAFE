@@ -18,14 +18,15 @@ AI kit check (optional): `pip install ultralytics`; the pose and PPE models down
 ## 3. Firmware (Arduino IDE, ESP32 core 3.x)
 | Setting | Value |
 |---|---|
-| Board | ESP32S3 Dev Module / XIAO_ESP32C6 |
+| Board | ESP32S3 Dev Module (body unit) · XIAO_ESP32C6 (repeaters, mock body) · XIAO_ESP32S3 (entry station) |
 | USB CDC On Boot | Enabled |
 | Serial Monitor | 115200 baud |
 
 - `repeater_node`: copy `secrets.example.h` → `secrets.h`. Main repeater `IS_GATEWAY 1`, `REPEATER_NO 1`; tunnel repeaters `IS_GATEWAY 0`, `REPEATER_NO` 2, 3, 4 …
   `GAS_ENABLED 0` if no gas sensor is fitted. Buzzer options: `BUZZER_PASSIVE`, `BUZZER_ACTIVE_LOW`; type `b` in Serial Monitor for a 1 s buzzer test.
 - `body_node`: set `BODY_ID` (must match the admin page). Wear or hold upright and keep still for 3 s at power-on (gyro zero).
-- `entry_station`: copy `secrets.example.h` → `secrets.h`.
+  Mock worker on an ESP32-C6 with only an MPU6050: `BODY_ID "BODY-02"`, `MOCK_MPU_ONLY 1`.
+- `entry_station` (XIAO ESP32-S3 Sense): copy `secrets.example.h` → `secrets.h`; **Tools → PSRAM: OPI PSRAM**. Wiring in [wiring.md](wiring.md).
 - Body and repeater share one packet format — flash both after updating either.
 
 ## 4. Map
@@ -35,7 +36,13 @@ AI kit check (optional): `pip install ultralytics`; the pose and PPE models down
 4. **Draw tunnel** along each tunnel; Enter to finish.
 5. **Place** each repeater where it is mounted; set its height z.
 
-## 5. Test without a body unit
+## 5. Entry check with the camera station
+1. Worker taps helmet, vest, pants and shoes tags on the reader (READ mode) — each shows SUCCESS + admin verdict.
+2. Press **PHOTO** → 3-2-1 countdown → photo is sent to the hub with the scanned tags → OLED shows the AI verdict (or "admin checks" if the AI is not installed).
+3. On the laptop, *Entry check* tab: the new card shows the photo, the tags and the AI result. Type the worker's name, pick the body unit (e.g. BODY-01) and **Approve** — the body unit is now paired to that worker.
+4. The phone page `http://<laptop IP>:5000/phone` still works as a backup camera.
+
+## 6. Test without a body unit
 1. Phone on the hotspot → `http://<repeater IP>/` (IP shown on the Serial Monitor and the Network tab).
 2. PHONE-01 appears on *Live*. Try Fall, SOS, heart-rate slider.
 3. Walk buttons (5 steps, 90°, Auto walk) move the dot on the map.

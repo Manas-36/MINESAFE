@@ -37,9 +37,9 @@ flowchart LR
 
 | Part | What it does |
 |---|---|
-| **Entry station** | RFID (NTAG215) tags on helmet, vest, pants, shoes + phone photo + AI kit check (YOLOv8). Admin approves and pairs a body unit. |
-| **Body unit** | ESP32-S3 / XIAO ESP32-C6 with MPU6050, BMP180, DS18B20, MAX30100/30102. Steps, heading, fall, no movement, body temp, heart rate, SpO₂ (estimate), height, SOS button, alert LED. |
-| **Repeater chain** | ESP32 nodes along the tunnel relay data hop by hop over ESP-NOW. Routes form and heal by themselves. Each node has a buzzer and an MQ gas sensor. |
+| **Entry station** | XIAO ESP32-S3 Sense: RFID (NTAG215) tags on helmet, vest, pants, shoes + **built-in camera photo** (PHOTO button) + AI kit check (YOLOv8). Admin approves and pairs a body unit. Phone photo page as backup. |
+| **Body unit** | ESP32-S3 N16R8 with MPU6050, BMP180, DS18B20, MAX30100/30102 (an ESP32-C6 + MPU6050 "mock" unit adds a second worker for demos). Steps, heading, fall, no movement, body temp, heart rate, SpO₂ (estimate), height, SOS button, alert LED. |
+| **Repeater chain** | XIAO ESP32-C6 nodes along the tunnel relay data hop by hop over ESP-NOW. Routes form and heal by themselves. Each node has a buzzer and an MQ gas sensor. |
 | **Control room** | `admin_hub.py` on a laptop: live status, tunnel map with worker dots, gas & air, worker registration with medical card, entry check, AI kit check, network health, incident log, one-click alert. |
 
 ### Location without GPS
@@ -57,7 +57,7 @@ Raw double integration of acceleration drifts by ~175 m in a minute, so MineSafe
 
 ## Progress
 
-**40 / 56 tasks done · Week 9 of 14** `████████████████████░░░░░░░░░░` → full week-by-week plan, Gantt chart and checklist in **[ROADMAP.md](ROADMAP.md)**
+**42 / 59 tasks done · Week 9 of 14** `████████████████████░░░░░░░░░░` → full week-by-week plan, Gantt chart and checklist in **[ROADMAP.md](ROADMAP.md)**
 
 | Version | Milestone | Status |
 |---|---|---|
@@ -69,6 +69,8 @@ Raw double integration of acceleration drifts by ~175 m in a minute, so MineSafe
 | v0.5 | First end-to-end run: phone worker, body unit, alerts, buzzer | ✅ tested on hardware |
 | v0.6 | Tunnel map + GPS-free tracking, gas analysis, real body sensors | ✅ software · 🔧 sensor bench test next |
 | v1.0 | Structured repo, docs, presentation, Notion | ✅ |
+| v1.1 | Camera entry station (XIAO S3 Sense), mock worker, schematics, admin theme, research docs | ✅ software · 🔧 hardware test next |
+| v2.x | Zigbee (802.15.4) network on ESP32-C6 nodes | 📋 planned |
 
 Every version has its own branch (`version/v0.0` … `version/v1.0`) — see [CHANGELOG.md](CHANGELOG.md) for what changed and [docs/decisions.md](docs/decisions.md) for why.
 
@@ -139,7 +141,7 @@ Opening screen of the control room (press **Get started** or Enter):
 Approximate India-market prices, 2026. Item-by-item: [hardware/bom_prototype.csv](hardware/bom_prototype.csv) · [hardware/bom_pilot.csv](hardware/bom_pilot.csv).
 
 ## Future scope
-UWB anchors for sub-metre location · LoRa backbone for long tunnels · MQ-4 / electrochemical CO and O₂ sensors · intrinsically safe enclosure · kit-removal sensing (helmet IR sensor, vest buckle reed switch, BLE tags) · OLED messages to workers · shift analytics.
+Zigbee (802.15.4) mesh on ESP32-C6 nodes · UWB anchors for sub-metre location · LoRa backbone for long tunnels · MQ-4 / electrochemical CO and O₂ sensors · intrinsically safe enclosure · kit-removal sensing (helmet IR sensor, vest buckle reed switch, BLE tags) · OLED messages to workers · shift analytics.
 
 ## Team
 | Name | Roll no. | GitHub |

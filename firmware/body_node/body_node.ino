@@ -47,6 +47,11 @@
 // ------------------------- CONFIG ------------------------------------
 const char* BODY_ID = "BODY-01";      // must match the "Body ESP code" on the admin page
 
+// MOCK BODY UNIT: an extra worker for the map demo with only an MPU6050 fitted
+// (e.g. ESP32-C6 + MPU6050, BODY_ID "BODY-02"). 1 = skip the other sensors and tell
+// the hub "no vitals sensors" so it does not show sensor-fault warnings.
+#define MOCK_MPU_ONLY        0
+
 #define USE_EXTERNAL_ANTENNA 0        // XIAO ESP32-C6 only: 1 = antenna on the u.FL socket (fit it first!)
 
 #if CONFIG_IDF_TARGET_ESP32C6         // Seeed XIAO ESP32-C6
@@ -83,7 +88,8 @@ const char* BODY_ID = "BODY-01";      // must match the "Body ESP code" on the a
 #define MS_VER 3
 enum : uint8_t { MS_TELEM = 1, MS_BEACON = 10 };
 enum : uint16_t { BF_FALL = 1, BF_NOMOTION = 2, BF_IMPACT = 4, BF_SOS = 8, BF_MPU_FAULT = 16,
-                  BF_TEMP_FAULT = 32, BF_ALERT_LED = 64, BF_TEST = 128 };
+                  BF_TEMP_FAULT = 32, BF_ALERT_LED = 64, BF_TEST = 128,
+                  BF_NO_VITALS = 256 };                   // mock unit: no temp / heart-rate sensors fitted
 
 struct __attribute__((packed)) MsTelem {        // body -> repeaters
   char     magic[2];
@@ -637,7 +643,11 @@ void sendTelemetry(uint32_t now) {
   bool dsFresh = dsOk && dsGood && now - dsGood < 5000;
   t.tObj = dsFresh ? (int16_t)(dsTemp * 100) : 0;
   t.tAmb = !isnan(bmpTemp) ? (int16_t)(bmpTemp * 100) : t.tObj;
+#if MOCK_MPU_ONLY
+  f |= BF_NO_VITALS;
+#else
   if (!dsFresh) f |= BF_TEMP_FAULT;
+#endif
   if (mpuOk) {
     t.ax = (int16_t)(ax_g * 1000); t.ay = (int16_t)(ay_g * 1000); t.az = (int16_t)(az_g * 1000);
     t.gx = (int16_t)(gx_d * 10); t.gy = (int16_t)(gy_d * 10); t.gz = (int16_t)(gz_d * 10);
@@ -732,6 +742,9 @@ void setup() {
 
   mpuOk = mpuBegin();
   if (mpuOk) mpuCalibrate(); else Serial.println("  MPU6050 NOT found -> no steps / fall detection");
+#if MOCK_MPU_ONLY
+  Serial.println("  MOCK body unit: MPU6050 only (no BMP180 / DS18B20 / heart-rate)");
+#else
   bmpOk = bmpBegin();
   if (!bmpOk) Serial.println("  BMP180 NOT found -> no height");
   dsOk = dsBegin();
@@ -746,6 +759,7 @@ void setup() {
     Serial.println("  No heart-rate sensor");
 #endif
   }
+#endif
   digitalWrite(LED_PIN, LOW);
   lastMotionAt = millis();
 

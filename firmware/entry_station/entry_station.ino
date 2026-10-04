@@ -1,42 +1,53 @@
 // =====================================================================
-//  Miner Safety System - ENTRY STATION v2 (2 buttons)
-//  Board : Seeed XIAO ESP32-C6   (Arduino ESP32 core 3.x)
+//  MineSafe - ENTRY STATION v3 (RFID gear tags + camera photo)
+//  Board : Seeed XIAO ESP32-S3 Sense (camera)  - also builds for XIAO ESP32-C6 (no camera)
+//          Arduino ESP32 core 3.x. XIAO S3: Tools -> PSRAM: "OPI PSRAM".
 //  Parts : PN532 NFC (I2C mode), SSD1306 0.96" 128x64 I2C OLED,
-//          2 push buttons (READ, WRITE), NTAG215 tags
+//          3 push buttons (READ, WRITE, PHOTO), NTAG215 tags, OV2640/OV3660 camera (Sense board)
 //  Libs  : Adafruit PN532 (latest), Adafruit SSD1306, Adafruit GFX
 //
-//  WIRING (PN532 and OLED share I2C: PN532=0x24, OLED=0x3C)
+//  WIRING (PN532 and OLED share I2C: PN532=0x24, OLED=0x3C)      XIAO S3     XIAO C6
 //    PN532 VCC / OLED VCC -> 3V3      PN532 GND / OLED GND -> GND
-//    PN532 SDA / OLED SDA -> D4       PN532 SCL / OLED SCL -> D5
-//    PN532 IRQ / RST      -> not needed (latest library polls "ready" over I2C)
-//    READ  button         -> D1 and GND   (internal pull-up)
-//    WRITE button         -> D0 and GND   (internal pull-up)
+//    PN532 SDA / OLED SDA -> D4                                    GPIO5       GPIO22
+//    PN532 SCL / OLED SCL -> D5                                    GPIO6       GPIO23
+//    READ  button  -> D1 and GND   (internal pull-up)              GPIO2       GPIO1
+//    WRITE button  -> D0 and GND   (internal pull-up)              GPIO1       GPIO0
+//    PHOTO button  -> D3 and GND   (internal pull-up)              GPIO4       GPIO21
+//    Camera: plugged into the Sense expansion board (B2B connector), no wires.
 //
 //  HOW IT WORKS
 //   READ button  : always takes you to READ mode (from any screen).
 //   READ mode    : "Tap tag" -> tap a tag -> SUCCESS screen with the gear
 //                  name + admin verdict -> back to "Tap tag" after 3 s.
 //   WRITE button : opens the gear menu (HELMET / VEST / PANTS / SHOES).
-//     in menu    : WRITE tap  = move to next item
-//                  WRITE hold = select (a bar fills while holding)
-//     after pick : "Place tag for VEST" -> tap tag -> SUCCESS screen,
-//                  then back to the menu on the SAME item, so you can
-//                  write many helmets in a row or pick anything else.
-//                  Menu shows how many of each you wrote (e.g. HELMET x3).
-//                  WRITE tap here = go back and change the item.
-//   A tag already written as a different item in this session -> warning.
+//     in menu    : WRITE tap = next item, WRITE hold = select
+//     after pick : "Place tag for VEST" -> tap tag -> SUCCESS -> back to the menu.
+//   PHOTO button : (after the worker has tapped all gear tags) 3-2-1 countdown,
+//                  takes a photo and sends it to the hub with the scanned tags ->
+//                  hub runs the AI kit check -> verdict shown on the OLED.
+//                  Admin approves on the Entry check tab and pairs a body unit.
 //   30 s with no button press in write screens -> back to READ.
 //
 //  TAG FORMAT (NTAG215 pages 4..7, 16 bytes): "MS1:" + gear name, zero padded.
 //  Pages 0..3 (UID, lock bits, CC) are never touched.
+//
+//  HUB ADDRESS: if the laptop IP changes (phone hotspot), the station scans the
+//  hotspot subnet for the hub on port 5000 by itself (HUB_AUTOFIND).
 // =====================================================================
 
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <NetworkClient.h>
 #include <Wire.h>
 #include <Adafruit_PN532.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#if CONFIG_IDF_TARGET_ESP32S3
+  #define HAS_CAMERA 1
+  #include "esp_camera.h"
+#else
+  #define HAS_CAMERA 0
+#endif
 
 // ------------------------- CONFIG ------------------------------------
 // Copy secrets.example.h to secrets.h and fill it in (not uploaded to GitHub).
@@ -53,6 +64,10 @@ const char* STATION_ID = "ENTRY-01";
 #define PN532_RESET  -1   // not wired
 #define BTN_READ     D1
 #define BTN_WRITE    D0
+#define BTN_PHOTO    D3
+#define HUB_AUTOFIND 1    // find the hub on the subnet if the laptop IP changed
+#define HUB_PORT     5000
+#define COUNTDOWN_S  3    // photo countdown
 
 #define LONG_MS            800     // hold time to select in menu
 #define DEBOUNCE_MS        30
@@ -93,7 +108,7 @@ struct Button {
   bool down = false, longFired = false;
   unsigned long pressedAt = 0, lastEdge = 0;
 };
-Button btnR{BTN_READ}, btnW{BTN_WRITE};
+Button btnR{BTN_READ}, btnW{BTN_WRITE}, btnP{BTN_PHOTO};
 
 BtnEvent poll(Button& b) {
   bool pressed = (digitalRead(b.pin) == LOW);
@@ -159,7 +174,7 @@ void showReadIdle() {
   header("READ MODE", wifiTag());
   centerText("Tap tag", 20, 2);
   centerText("on the reader", 40, 1);
-  footer("W: write mode");
+  footer(HAS_CAMERA ? "W:write  P:photo" : "W: write mode");
   oled.display();
 }
 
@@ -252,6 +267,64 @@ bool writeGear(const char* gear) {
 }
 
 // ------------------------- ADMIN LINK --------------------------------
+String hubBase;   // "http://10.180.64.143:5000" - taken from ADMIN_URL, updated by HUB_AUTOFIND
+
+void initHubBase() {
+  hubBase = ADMIN_URL;
+  int k = hubBase.indexOf("/api/");
+  if (k > 0) hubBase = hubBase.substring(0, k);
+}
+
+// Scan the /24 subnet for something listening on HUB_PORT (laptop running admin_hub.py).
+bool findHub() {
+#if HUB_AUTOFIND
+  if (WiFi.status() != WL_CONNECTED) return false;
+  IPAddress me = WiFi.localIP();
+  showBusy("Finding hub");
+  for (int i = 1; i < 255; i++) {
+    if (i == me[3]) continue;
+    IPAddress ip(me[0], me[1], me[2], i);
+    NetworkClient c;
+    if (c.connect(ip, HUB_PORT, 120)) {
+      c.stop();
+      hubBase = "http://" + ip.toString() + ":" + String(HUB_PORT);
+      Serial.println("Hub found at " + hubBase);
+      return true;
+    }
+  }
+#endif
+  return false;
+}
+
+// POST to hub path; on connection failure try to find the hub once and retry.
+int hubPost(const String& path, const char* type, const uint8_t* body, size_t len, String& resp,
+            const char* hdrName, const char* hdrVal, uint16_t timeoutMs) {
+  for (int attempt = 0; attempt < 2; attempt++) {
+    HTTPClient http;
+    http.setTimeout(timeoutMs);
+    http.begin(hubBase + path);
+    http.addHeader("Content-Type", type);
+    if (hdrName) http.addHeader(hdrName, hdrVal);
+    int code = http.POST((uint8_t*)body, len);
+    resp = (code > 0) ? http.getString() : "";
+    http.end();
+    if (code > 0 || attempt == 1 || !findHub()) return code;
+  }
+  return -1;
+}
+
+String jsonField(const String& resp, const char* key) {
+  String k = String("\"") + key + "\":";
+  int i = resp.indexOf(k);
+  if (i < 0) return "";
+  i += k.length();
+  while (i < (int)resp.length() && resp[i] == ' ') i++;
+  if (resp[i] == '"') { int e = resp.indexOf('"', i + 1); return resp.substring(i + 1, e); }
+  int e = i;
+  while (e < (int)resp.length() && resp[e] != ',' && resp[e] != '}') e++;
+  return resp.substring(i, e);
+}
+
 // Returns admin verdict (OK / ISSUED / MISMATCH / UNKNOWN TAG) or OFFLINE / ERR.
 String sendToAdmin(const char* event, const String& uid, const char* gear, const char* prev) {
   if (WiFi.status() != WL_CONNECTED) return "OFFLINE";
@@ -259,18 +332,89 @@ String sendToAdmin(const char* event, const String& uid, const char* gear, const
   snprintf(body, sizeof(body),
            "{\"station\":\"%s\",\"event\":\"%s\",\"uid\":\"%s\",\"gear\":\"%s\",\"prev\":\"%s\"}",
            STATION_ID, event, uid.c_str(), gear, prev);
-  HTTPClient http;
-  http.setTimeout(2000);
-  http.begin(ADMIN_URL);
-  http.addHeader("Content-Type", "application/json");
-  int code = http.POST(body);
-  String resp = (code > 0) ? http.getString() : "";
-  http.end();
-  if (code < 200 || code >= 300) return "ERR " + String(code);
-  int k = resp.indexOf("\"check\":\"");
-  if (k < 0) return "SENT";
-  k += 9;
-  return resp.substring(k, resp.indexOf('"', k));
+  String resp;
+  int code = hubPost("/api/gear", "application/json", (const uint8_t*)body, strlen(body), resp, nullptr, nullptr, 2000);
+  if (code < 200 || code >= 300) return code > 0 ? "ERR " + String(code) : "NO HUB";
+  String c = jsonField(resp, "check");
+  return c.length() ? c : "SENT";
+}
+
+// ------------------------- CAMERA ------------------------------------
+#if HAS_CAMERA
+bool camOk = false;
+
+bool camBegin() {                     // Seeed XIAO ESP32-S3 Sense pin map
+  camera_config_t c = {};
+  c.ledc_channel = LEDC_CHANNEL_0;
+  c.ledc_timer   = LEDC_TIMER_0;
+  c.pin_d0 = 15; c.pin_d1 = 17; c.pin_d2 = 18; c.pin_d3 = 16;
+  c.pin_d4 = 14; c.pin_d5 = 12; c.pin_d6 = 11; c.pin_d7 = 48;
+  c.pin_xclk = 10; c.pin_pclk = 13; c.pin_vsync = 38; c.pin_href = 47;
+  c.pin_sccb_sda = 40; c.pin_sccb_scl = 39;
+  c.pin_pwdn = -1; c.pin_reset = -1;
+  c.xclk_freq_hz = 20000000;
+  c.pixel_format = PIXFORMAT_JPEG;
+  c.grab_mode    = CAMERA_GRAB_LATEST;
+  if (psramFound()) {
+    c.frame_size = FRAMESIZE_SVGA;     // 800x600 is plenty for the AI kit check
+    c.jpeg_quality = 12;
+    c.fb_count = 2;
+    c.fb_location = CAMERA_FB_IN_PSRAM;
+  } else {
+    c.frame_size = FRAMESIZE_VGA;
+    c.jpeg_quality = 14;
+    c.fb_count = 1;
+    c.fb_location = CAMERA_FB_IN_DRAM;
+  }
+  c.sccb_i2c_port = 1;                 // camera on I2C port 1, PN532 + OLED on Wire (port 0)
+  esp_err_t e = esp_camera_init(&c);
+  if (e != ESP_OK) { Serial.printf("Camera init failed 0x%x (PSRAM on? camera seated?)\n", e); return false; }
+  sensor_t* s = esp_camera_sensor_get();
+  if (s && s->id.PID == OV3660_PID) { s->set_vflip(s, 1); s->set_brightness(s, 1); }
+  Serial.println(psramFound() ? "Camera OK (SVGA, PSRAM)" : "Camera OK (VGA, no PSRAM)");
+  return true;
+}
+#endif
+
+void takeAndSendPhoto() {
+#if !HAS_CAMERA
+  showResult(false, "NO CAM", "This board has", "no camera - use phone");
+#else
+  if (!camOk) { showResult(false, "NO CAM", "Camera not found", "Check Sense board"); return; }
+  for (int i = COUNTDOWN_S; i > 0; i--) {             // let the worker stand still
+    oled.clearDisplay();
+    oled.setTextColor(W);
+    centerText("Stand in frame", 2, 1);
+    centerText(String(i), 18, 4);
+    oled.display();
+    camera_fb_t* warm = esp_camera_fb_get();          // keep auto-exposure settling
+    if (warm) esp_camera_fb_return(warm);
+    delay(1000);
+  }
+  showBusy("Click!");
+  camera_fb_t* fb = esp_camera_fb_get();
+  if (fb) { esp_camera_fb_return(fb); fb = esp_camera_fb_get(); }   // fresh frame
+  if (!fb) { showResult(false, "FAILED", "Camera error", "Press P again"); return; }
+  size_t kb = fb->len / 1024;
+  Serial.printf("Photo %ux%u %u KB\n", fb->width, fb->height, (unsigned)fb->len);
+
+  if (WiFi.status() != WL_CONNECTED) { esp_camera_fb_return(fb); showResult(false, "OFFLINE", "No WiFi", "Photo not sent"); return; }
+  showBusy("Sending...");
+  String resp;
+  int code = hubPost("/api/camphoto", "image/jpeg", fb->buf, fb->len, resp, "X-Station", STATION_ID, 20000);
+  esp_camera_fb_return(fb);
+  if (code < 200 || code >= 300) {
+    showResult(false, "FAILED", code > 0 ? "Hub error " + String(code) : "Hub not found", String(kb) + " KB photo");
+    return;
+  }
+  String ai = jsonField(resp, "ai"), det = jsonField(resp, "detail"), n = jsonField(resp, "scans");
+  bool good = ai.startsWith("KIT COMPLETE") || ai == "OFF";
+  String l1 = "AI: " + (ai == "OFF" ? String("admin checks") : ai);
+  showResult(good, "SENT", l1.substring(0, 21), (n + " tags | " + det).substring(0, 21));
+  Serial.println("Hub: " + resp);
+#endif
+  resultAt = millis();
+  mode = READ_RESULT;
 }
 
 // ------------------------- MODE CHANGES ------------------------------
@@ -374,11 +518,13 @@ void setup() {
   Serial.begin(115200);
   pinMode(BTN_READ, INPUT_PULLUP);
   pinMode(BTN_WRITE, INPUT_PULLUP);
+  pinMode(BTN_PHOTO, INPUT_PULLUP);
+  initHubBase();
 
   if (!oled.begin(SSD1306_SWITCHCAPVCC, 0x3C)) Serial.println("OLED not found");
   oled.clearDisplay();
   oled.setTextColor(W);
-  centerText("MINER SAFETY", 10, 1);
+  centerText("MINESAFE", 10, 1);
   centerText("Entry Station", 22, 1);
   centerText("Starting NFC...", 44, 1);
   oled.display();
@@ -417,6 +563,13 @@ void setup() {
   }
   nfc.SAMConfig();
 
+#if HAS_CAMERA
+  oled.fillRect(0, 44, 128, 10, B);
+  centerText("Starting camera...", 44, 1);
+  oled.display();
+  camOk = camBegin();
+#endif
+
   oled.fillRect(0, 44, 128, 10, B);
   centerText("Connecting WiFi...", 44, 1);
   oled.display();
@@ -433,8 +586,12 @@ void setup() {
 void loop() {
   BtnEvent r = poll(btnR);
   BtnEvent w = poll(btnW);
+  BtnEvent p = poll(btnP);
   uint8_t uid[7];
   uint8_t len = 0;
+
+  // PHOTO button works from READ screens
+  if (p == BTN_SHORT && (mode == READ_IDLE || mode == READ_RESULT)) { takeAndSendPhoto(); return; }
 
   // READ button works from anywhere
   if (r != BTN_NONE) {
