@@ -43,6 +43,7 @@
 #include <esp_wifi.h>
 #include "esp_random.h"
 #include "driver/gpio.h"
+#include "esp_log.h"
 
 // ------------------------- CONFIG ------------------------------------
 const char* BODY_ID = "BODY-01";      // must match the "Body ESP code" on the admin page
@@ -204,6 +205,7 @@ uint16_t steps = 0;
 float    stepLp = 1, stepBase = 1;
 bool     stepArmed = true;
 uint32_t lastStepAt = 0, lastMotionAt = 0, stillSince = 0, mpuErrAt = 0;
+uint16_t mpuFails = 0;                       // failed reads in a row (loose wire -> sensor marked lost)
 uint32_t freefallStart = 0, freefallAt = 0, impactAt = 0, impactFlagUntil = 0;
 bool     fallActive = false, noMotion = false;
 uint32_t fallSince = 0, uprightSince = 0;
@@ -275,9 +277,13 @@ float tiltFromUpright() {
 // called 100 times a second
 void motionUpdate(uint32_t now, float dt) {
   if (!mpuRead()) {
-    if (now - mpuErrAt > 5000) { mpuErrAt = now; Serial.println("MPU6050 read failed"); }
+    if (++mpuFails >= 50) {                                  // 0.5 s of failed reads: stop asking, retry every 3 s
+      mpuOk = false;
+      Serial.printf("MPU6050 (0x%02X) stopped answering - check its SDA/SCL/VCC/GND wires. Retrying every 3 s.\n", mpuAddr);
+    }
     return;
   }
+  mpuFails = 0;
   // gravity direction (slow average of the accelerometer)
   float acc[3] = {ax_g, ay_g, az_g};
   for (int i = 0; i < 3; i++) grav[i] += (acc[i] - grav[i]) * 0.03f;
@@ -390,6 +396,14 @@ void bmpCompute(int32_t UT, int32_t UP, float& tC, int32_t& pPa) {
 }
 
 // non-blocking: one reading every 100 ms
+bool     bmpFound = false;
+uint16_t bmpFails = 0;
+void bmpFail() {
+  if (++bmpFails >= 10) {
+    bmpOk = false; bmpState = 0;
+    Serial.println("BMP180 (0x77) stopped answering - check its wires. Retrying every 3 s.");
+  }
+}
 void bmpUpdate(uint32_t now) {
   if (!bmpOk) return;
   uint8_t b[3];
@@ -399,12 +413,13 @@ void bmpUpdate(uint32_t now) {
       bmpAt = now; wr8(0x77, 0xF4, 0x2E); bmpState = 1; break;           // start temperature
     case 1:
       if (now - bmpAt < 6) return;
-      if (rdN(0x77, 0xF6, b, 2)) bmpUT = (b[0] << 8) | b[1];
+      if (rdN(0x77, 0xF6, b, 2)) bmpUT = (b[0] << 8) | b[1]; else { bmpFail(); return; }
       wr8(0x77, 0xF4, 0x34 + (BMP_OSS << 6)); bmpAt = now; bmpState = 2; break;   // start pressure
     case 2: {
       if (now - bmpAt < 27) return;
       bmpState = 0;
-      if (!rdN(0x77, 0xF6, b, 3)) return;
+      if (!rdN(0x77, 0xF6, b, 3)) { bmpFail(); return; }
+      bmpFails = 0;
       int32_t UP = (((int32_t)b[0] << 16) | ((int32_t)b[1] << 8) | b[2]) >> (8 - BMP_OSS);
       float t; int32_t p;
       bmpCompute(bmpUT, UP, t, p);
@@ -494,6 +509,8 @@ void dsUpdate(uint32_t now) {
 
 // ------------------------- heart rate -----------------------------------
 uint8_t  maxType = 0;                 // 0 none, 1 MAX30100, 2 MAX30102/30105
+bool     maxFound = false;
+uint16_t maxFails = 0;
 bool     pulseAnalog = false;
 Beat     beat;
 float    irDc = 0, redDc = 0, irAc2 = 0, redAc2 = 0, spo2Est = 0;
@@ -579,7 +596,14 @@ void hrUpdate(uint32_t now) {
     hrAt = now;
     uint8_t wrReg = maxType == 1 ? 0x02 : 0x04, rdReg = maxType == 1 ? 0x04 : 0x06, dataReg = maxType == 1 ? 0x05 : 0x07;
     int w = rd8(MAXA, wrReg), r = rd8(MAXA, rdReg);
-    if (w < 0 || r < 0) return;
+    if (w < 0 || r < 0) {
+      if (++maxFails >= 25) {                                 // 0.5 s: stop asking, retry every 3 s
+        maxType = 0; finger = false; beatReset();
+        Serial.println("MAX3010x (0x57) stopped answering - check its wires. Retrying every 3 s.");
+      }
+      return;
+    }
+    maxFails = 0;
     int n = (w - r) & (maxType == 1 ? 15 : 31);
     uint8_t per = maxType == 1 ? 4 : 6;
     while (n-- > 0) {
@@ -597,6 +621,22 @@ void hrUpdate(uint32_t now) {
     finger = mv > 200 && mv < 3200;                           // pin floating near 0 or stuck high = no sensor/finger
     if (finger) beatAdd(mv, now); else if (beat.bpm) beatReset();
   }
+}
+
+// A sensor that stops answering (loose jumper, bad contact) is no longer asked 100 times a second:
+// every 3 s the I2C bus is restarted and the lost sensor is looked for again.
+void sensorRecover(uint32_t now) {
+  static uint32_t lastTry = 0;
+  bool mpuLost = mpuAddr && !mpuOk, bmpLost = bmpFound && !bmpOk, maxLost = maxFound && !maxType;
+  if (!(mpuLost || bmpLost || maxLost) || now - lastTry < 3000) return;
+  lastTry = now;
+  Wire.end();                                               // frees a bus stuck by a half-finished transfer
+  Wire.begin(I2C_SDA, I2C_SCL);
+  Wire.setClock(100000);
+  Wire.setTimeOut(20);
+  if (mpuLost && mpuBegin()) { mpuOk = true; mpuFails = 0; Serial.println("MPU6050 back"); }
+  if (bmpLost && bmpBegin()) { bmpOk = true; bmpFails = 0; bmpState = 0; Serial.println("BMP180 back"); }
+  if (maxLost && maxBegin()) { maxFails = 0; Serial.println("MAX3010x back"); }
 }
 
 // ------------------------- state -------------------------------------
@@ -735,6 +775,8 @@ void setup() {
   Wire.begin(I2C_SDA, I2C_SCL);
   Wire.setClock(100000);
   Wire.setTimeOut(20);
+  esp_log_level_set("i2c.master", ESP_LOG_NONE);              // no "I2C transaction failed" flood; the sketch
+  esp_log_level_set("i2c", ESP_LOG_NONE);                     // reports a missing sensor once, by name
   Serial.print("  I2C devices found:");
   int found = 0;
   for (uint8_t a = 1; a < 127; a++) if (i2cPresent(a)) { Serial.printf(" 0x%02X", a); found++; }
@@ -745,11 +787,12 @@ void setup() {
 #if MOCK_MPU_ONLY
   Serial.println("  MOCK body unit: MPU6050 only (no BMP180 / DS18B20 / heart-rate)");
 #else
-  bmpOk = bmpBegin();
+  bmpOk = bmpFound = bmpBegin();
   if (!bmpOk) Serial.println("  BMP180 NOT found -> no height");
   dsOk = dsBegin();
   Serial.println(dsOk ? "  DS18B20 probe found" : "  DS18B20 NOT found -> no body temperature (4.7k pull-up fitted?)");
-  if (!maxBegin()) {
+  maxFound = maxBegin();
+  if (!maxFound) {
 #if USE_HW827
     analogSetPinAttenuation(PULSE_PIN, ADC_11db);
     pulseAnalog = true;
@@ -785,6 +828,7 @@ void loop() {
   bmpUpdate(now);
   dsUpdate(now);
   hrUpdate(now);
+  sensorRecover(now);
   bool changed = handleButton(now);
   updateLed(now);
 

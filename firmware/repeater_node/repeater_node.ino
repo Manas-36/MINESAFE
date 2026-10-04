@@ -54,6 +54,7 @@
 
 #include <WiFi.h>
 #include <Wire.h>
+#include "esp_log.h"
 #include <WebServer.h>
 #include <HTTPClient.h>
 #include <esp_now.h>
@@ -949,6 +950,9 @@ void setup() {
 #if AHT_ENABLED
   Wire.begin(AHT_SDA, AHT_SCL);
   Wire.setClock(100000);
+  Wire.setTimeOut(20);
+  esp_log_level_set("i2c.master", ESP_LOG_NONE);   // no I2C error flood if the AHT is unplugged
+  esp_log_level_set("i2c", ESP_LOG_NONE);
   delay(40);                            // AHT needs ~40 ms after power-on
   Serial.printf("AHT air sensor on SDA GPIO%d / SCL GPIO%d: %s\n", AHT_SDA, AHT_SCL,
                 ahtInit() ? "found" : "NOT found (check wiring) - will keep looking");
