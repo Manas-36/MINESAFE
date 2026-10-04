@@ -4,13 +4,13 @@
 
 **Week-by-week progress of the capstone — from research to final review**
 
-![Progress](https://img.shields.io/badge/progress-67%25-F2A900?style=for-the-badge)
-![Done](https://img.shields.io/badge/done-36-2ea44f?style=for-the-badge)
+![Progress](https://img.shields.io/badge/progress-68%25-F2A900?style=for-the-badge)
+![Done](https://img.shields.io/badge/done-38-2ea44f?style=for-the-badge)
 ![In progress](https://img.shields.io/badge/in_progress-2-fb8c00?style=for-the-badge)
 ![To do](https://img.shields.io/badge/to_do-16-6e7781?style=for-the-badge)
 ![Week](https://img.shields.io/badge/now-week_9_of_14-1f6feb?style=for-the-badge)
 
-`████████████████████░░░░░░░░░░`  **36 / 54 tasks**
+`████████████████████░░░░░░░░░░`  **38 / 56 tasks**
 
 </div>
 
@@ -30,7 +30,7 @@
 | ✅ | 06 | 7 Sep – 13 Sep | 📡 Zigbee → ESP-NOW, repeater chain, AI, gas | `v0.4` | `██████████` 4/4 |
 | ✅ | 07 | 14 Sep – 20 Sep | 🔗 Multi-hop chain + alert propagation | `v0.4` | `██████████` 3/3 |
 | ✅ | 08 | 21 Sep – 27 Sep | 🎯 First end-to-end run | `v0.5` | `██████████` 4/4 |
-| 🔄 | **09** ◀ now | 28 Sep – 4 Oct | 🗺️ Map tracking, gas analysis, real sensors, docs | `v0.6 / v1.0` | `████████░░` 9/11 |
+| 🔄 | **09** ◀ now | 28 Sep – 4 Oct | 🗺️ Map tracking, gas analysis, real sensors, docs | `v0.6 / v1.0` | `████████░░` 11/13 |
 | ⏳ | 10 | 5 Oct – 11 Oct | 🧪 Body unit bench test + calibration | `v1.1` | `░░░░░░░░░░` 0/4 |
 | ⏳ | 11 | 12 Oct – 18 Oct | 🤖 AI kit dataset + entry flow + kit-removal | `v1.2` | `░░░░░░░░░░` 0/3 |
 | ⏳ | 12 | 19 Oct – 25 Oct | 🔋 Power, enclosure, range test | `v1.3` | `░░░░░░░░░░` 0/3 |
@@ -145,7 +145,7 @@ gantt
 </details>
 
 <details open>
-<summary>🗺️ <b>Week 09</b> · 28 Sep – 4 Oct · Map tracking, gas analysis, real sensors, docs · <code>v0.6 / v1.0</code> · 9/11 · <b>◀ now</b></summary>
+<summary>🗺️ <b>Week 09</b> · 28 Sep – 4 Oct · Map tracking, gas analysis, real sensors, docs · <code>v0.6 / v1.0</code> · 11/13 · <b>◀ now</b></summary>
 
 - [x] Tunnel map + GPS-free tracking (steps, heading, repeater check-points) — <sub>Location & map</sub>
 - [x] Direction-aware map snapping + demo walker — <sub>Location & map</sub>
@@ -156,6 +156,8 @@ gantt
 - [x] Notion wiki, BOM and test log — <sub>Docs & review</sub>
 - [x] Structured GitHub repo with version history v0.0 → v1.0 — <sub>Docs & review</sub>
 - [x] Add guide name and branch to deck, Notion and GitHub — <sub>Docs & review</sub>
+- [x] Wiring schematics for every unit (SVG + PNG) — <sub>Hardware</sub>
+- [x] Admin themed like the deck + MINESAFE opening screen — <sub>Control room</sub>
 - [ ] Add DGMS accident statistic to the deck — <sub>Docs & review</sub> *(in progress)*
 - [ ] Attach literature review document to References — <sub>Docs & review</sub> *(in progress)*
 
@@ -214,9 +216,9 @@ gantt
 | Subsystem | Done | Open | Progress |
 |---|:-:|:-:|---|
 | Research | 6 | 0 | `██████████` 100 % |
-| Hardware | 1 | 3 | `██░░░░░░░░` 25 % |
+| Hardware | 2 | 3 | `████░░░░░░` 40 % |
 | Entry station | 3 | 1 | `████████░░` 75 % |
-| Control room | 6 | 1 | `█████████░` 86 % |
+| Control room | 7 | 1 | `█████████░` 88 % |
 | Testing | 3 | 2 | `██████░░░░` 60 % |
 | Network | 6 | 1 | `█████████░` 86 % |
 | Gas | 2 | 0 | `██████████` 100 % |
