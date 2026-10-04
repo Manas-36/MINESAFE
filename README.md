@@ -142,9 +142,9 @@ UWB anchors for sub-metre location · LoRa backbone for long tunnels · MQ-4 / e
 |---|---|---|
 | Manas Pednekar | 36 | [@Manas-36](https://github.com/Manas-36) |
 | Amey Satale | 46 | [@Ameyty](https://github.com/Ameyty) |
-| Aaryaa Kanojia | 18 | |
+| Aaryaa Kanojia | 18 | [@aaryaakanojia21](https://github.com/aaryaakanojia21) |
 
-Guide: **Mr Dipesh Tare**, Assistant Professor
+Guide: **Mr Dipesh Tare**, Assistant Professor · Full credits: [CONTRIBUTORS.md](CONTRIBUTORS.md)
 
 ## Licence
 MIT — see [LICENSE](LICENSE).
