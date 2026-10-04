@@ -83,6 +83,8 @@ From *Assignment 1 — Research Analysis and Problem Statement* (31 Jul 2026) an
 - A Comprehensive Survey on Wearable Computing for Mental and Physical Health Monitoring — MDPI Electronics, 2025 — <https://www.mdpi.com/2079-9292/14/17/3443>
 
 ### 4.4 Underground localisation and navigation
+- Bandyopadhyay, Chaulya, Mishra — **Wireless Information and Safety System for Mines**, J. Scientific & Industrial Research 68(2), 107–117, 2009 (CSIR-CIMFR Dhanbad: ZigBee active-RFID mesh, routers every 50–80 m, coordinator on RS-232 to the control room; US patent 8,587,414) — <https://www.researchgate.net/publication/226510179_Wireless_Information_and_Safety_System_for_Mines> · <https://cimfr.csircentral.net/616/> · <https://patents.google.com/patent/US8587414>
+- Wireless Information and Safety System for Underground Mines (same CIMFR group) — <https://www.researchgate.net/publication/238602856_Wireless_Information_and_Safety_System_for_Underground_Mines>
 - Research on IMU-Assisted UWB-Based Positioning Algorithm in Underground Coal Mines — MDPI Micromachines, 2023 — <https://pmc.ncbi.nlm.nih.gov/articles/PMC10384321/>
 - Accurate integrated position measurement system for mobile applications in GPS-denied coal mine — 2023 — <https://www.sciencedirect.com/science/article/abs/pii/S0019057823001830>
 - Development and Evaluation of a UWB-Based Indoor Positioning System for Underground Mine Environments — Mining, Metallurgy & Exploration, 2024 — <https://doi.org/10.1007/s42461-023-00797-z>
