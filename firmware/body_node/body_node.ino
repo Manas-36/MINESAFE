@@ -53,6 +53,11 @@ const char* BODY_ID = "BODY-01";      // must match the "Body ESP code" on the a
 // the hub "no vitals sensors" so it does not show sensor-fault warnings.
 #define MOCK_MPU_ONLY        0
 
+// MOCK BODY UNIT 2: only a DS18B20 temperature probe fitted (e.g. ESP32-C6 DevKit, BODY_ID "BODY-02").
+// 1 = no MPU / BMP / heart-rate; the hub shows the temperature and gives no motion-sensor warning.
+#define MOCK_TEMP_ONLY       0
+#define DS18B20_PIN_CUSTOM   -1       // -1 = default pin below; or a GPIO number, e.g. 10 for the ESP32-C6 DevKit
+
 #define USE_EXTERNAL_ANTENNA 0        // XIAO ESP32-C6 only: 1 = antenna on the u.FL socket (fit it first!)
 
 #if CONFIG_IDF_TARGET_ESP32C6         // Seeed XIAO ESP32-C6
@@ -69,6 +74,10 @@ const char* BODY_ID = "BODY-01";      // must match the "Body ESP code" on the a
   #define PULSE_PIN    4              // HW-827 analog (ADC1)
   #define BUTTON_PIN   5
   #define LED_PIN      6
+#endif
+#if DS18B20_PIN_CUSTOM >= 0
+  #undef  DS18B20_PIN
+  #define DS18B20_PIN  DS18B20_PIN_CUSTOM
 #endif
 #define USE_HW827          1          // 1 = use the HW-827 analog pulse sensor when no MAX3010x is found
 
@@ -90,7 +99,8 @@ const char* BODY_ID = "BODY-01";      // must match the "Body ESP code" on the a
 enum : uint8_t { MS_TELEM = 1, MS_BEACON = 10 };
 enum : uint16_t { BF_FALL = 1, BF_NOMOTION = 2, BF_IMPACT = 4, BF_SOS = 8, BF_MPU_FAULT = 16,
                   BF_TEMP_FAULT = 32, BF_ALERT_LED = 64, BF_TEST = 128,
-                  BF_NO_VITALS = 256 };                   // mock unit: no temp / heart-rate sensors fitted
+                  BF_NO_VITALS = 256,                     // mock unit: no temp / heart-rate sensors fitted
+                  BF_NO_MOTION = 512 };                   // mock unit: no motion sensor fitted                   // mock unit: no temp / heart-rate sensors fitted
 
 struct __attribute__((packed)) MsTelem {        // body -> repeaters
   char     magic[2];
@@ -697,7 +707,7 @@ void sendTelemetry(uint32_t now) {
     if (noMotion) f |= BF_NOMOTION;
     if (now < impactFlagUntil) f |= BF_IMPACT;
   } else {
-    f |= BF_MPU_FAULT;
+    f |= MOCK_TEMP_ONLY ? BF_NO_MOTION : BF_MPU_FAULT;
     t.head = 0x7FFF;
   }
   t.alt = bmpOk && bmpN >= 20 ? (int16_t)lroundf(bmpAlt * 10) : 0x7FFF;
@@ -784,9 +794,16 @@ void setup() {
   for (uint8_t a = 1; a < 127; a++) if (i2cPresent(a)) { Serial.printf(" 0x%02X", a); found++; }
   Serial.println(found ? "" : " none (check SDA/SCL/3V3/GND)");
 
+#if MOCK_TEMP_ONLY
+  Serial.printf("  MOCK body unit: DS18B20 temperature only (data GPIO%d, 4.7k to 3V3)\n", DS18B20_PIN);
+  dsOk = dsBegin();
+  Serial.println(dsOk ? "  DS18B20 probe found" : "  DS18B20 NOT found -> check data pin and the 4.7k pull-up");
+#else
   mpuOk = mpuBegin();
   if (mpuOk) mpuCalibrate(); else Serial.println("  MPU6050 NOT found -> no steps / fall detection");
-#if MOCK_MPU_ONLY
+#endif
+#if MOCK_TEMP_ONLY
+#elif MOCK_MPU_ONLY
   Serial.println("  MOCK body unit: MPU6050 only (no BMP180 / DS18B20 / heart-rate)");
 #else
   bmpOk = bmpFound = bmpBegin();

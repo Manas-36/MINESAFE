@@ -44,6 +44,18 @@ The 10 k / 20 k divider keeps the 0–5 V MQ output safe for the 3.3 V pin; the 
 ## Mock body unit (ESP32-C6 + MPU6050)
 An extra worker for the map demo. Flash `body_node` with `BODY_ID "BODY-02"` and `MOCK_MPU_ONLY 1`; only the MPU6050 is wired (same pins as the body unit's C6 column: SDA GPIO22 / D4, SCL GPIO23 / D5, VCC 3V3, GND). Button (GPIO19) and LED (GPIO18) are optional. The hub shows it as a motion-only worker — no temperature or heart-rate warnings.
 
+## Mock body unit 2 (ESP32-C6 DevKit + DS18B20)
+A temperature-only demo worker. Flash `body_node` with `BODY_ID "BODY-02"`, `MOCK_TEMP_ONLY 1`, `DS18B20_PIN_CUSTOM 10`; board *ESP32C6 Dev Module*.
+
+| DS18B20 | ESP32-C6 DevKit |
+|---|---|
+| Red (VDD) | 3V3 |
+| Black (GND) | GND |
+| Yellow (data) | GPIO10 |
+| 4.7 kΩ | between GPIO10 and 3V3 |
+
+The hub shows its temperature and gives no motion-sensor warning (flag `BF_NO_MOTION = 512`).
+
 ## Entry station (XIAO ESP32-S3 Sense)
 
 ![Entry station schematic](wiring/entry_station.svg)

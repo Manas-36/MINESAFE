@@ -84,6 +84,7 @@ F_FALL, F_NOMOTION, F_IMPACT, F_SOS, F_MPU_FAULT, F_TEMP_FAULT, F_ALERT_LED = (
 NONE16 = 0x7FFF                        # "no value" for heading / height
 F_TEST = 128                           # packet made by a repeater's phone test page
 F_NO_VITALS = 256                      # mock body unit: MPU only, no temp / heart-rate sensors
+F_NO_MOTION = 512                      # mock body unit: temperature only, no motion sensor
 FLAG_NAMES = {F_FALL: "Fall detected", F_NOMOTION: "No movement",
               F_IMPACT: "Hard impact", F_SOS: "SOS pressed",
               F_MPU_FAULT: "Motion sensor fault", F_TEMP_FAULT: "Temp sensor fault",
@@ -646,7 +647,7 @@ def ingest(p, rep, now):
     update_position(bid, latest[bid], now)
     h = history.setdefault(bid, deque(maxlen=900))
     h.append((round(now, 2), None if fl & (F_TEMP_FAULT | F_NO_VITALS) else temp,
-              None if fl & F_MPU_FAULT else amag, None if fl & F_MPU_FAULT else gmag, latest[bid]["hr"]))
+              None if fl & (F_MPU_FAULT | F_NO_MOTION) else amag, None if fl & (F_MPU_FAULT | F_NO_MOTION) else gmag, latest[bid]["hr"]))
 
 
 @app.post("/api/telemetry")
@@ -1415,7 +1416,7 @@ def live_view(bid, now):
         return None
     si = seqinfo.get(bid, {"rx": 0, "lost": 0})
     total = si["rx"] + si["lost"]
-    return {"temp": None if L["fl"] & (F_TEMP_FAULT | F_NO_VITALS) else L["temp"], "amb": L["amb"], "mock": bool(L["fl"] & F_NO_VITALS), "amag": L["amag"], "gmag": L["gmag"],
+    return {"temp": None if L["fl"] & (F_TEMP_FAULT | F_NO_VITALS) else L["temp"], "amb": L["amb"], "mock": bool(L["fl"] & (F_NO_VITALS | F_NO_MOTION)), "amag": L["amag"], "gmag": L["gmag"],
             "ax": L["ax"], "ay": L["ay"], "az": L["az"], "gx": L["gx"], "gy": L["gy"], "gz": L["gz"],
             "age": round(now - L["time"], 1), "seq": L["seq"], "rssi": L["rssi"],
             "repeater": L["repeater"], "heard_by": L["heard_by"], "fl": L["fl"],
