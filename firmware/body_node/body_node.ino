@@ -64,7 +64,15 @@ const char* BODY_ID = "BODY-01";      // must match the "Body ESP code" on the a
 
 #define USE_EXTERNAL_ANTENNA 0        // XIAO ESP32-C6 only: 1 = antenna on the u.FL socket (fit it first!)
 
-#if CONFIG_IDF_TARGET_ESP32C6         // Seeed XIAO ESP32-C6
+#if CONFIG_IDF_TARGET_ESP32C6 && !defined(ARDUINO_XIAO_ESP32C6)
+                                      // ESP32-C6-WROOM-1 DevKit (Tools -> Board: "ESP32C6 Dev Module")
+  #define I2C_SDA      6              // MPU6050 + BMP180 + MAX3010x
+  #define I2C_SCL      7
+  #define DS18B20_PIN  10             // 4.7k to 3V3
+  #define PULSE_PIN    2              // HW-827 S (analog: only GPIO0-6 on the C6)
+  #define BUTTON_PIN   18             // to GND
+  #define LED_PIN      19             // 220R to LED
+#elif CONFIG_IDF_TARGET_ESP32C6       // Seeed XIAO ESP32-C6
   #define I2C_SDA      22             // D4
   #define I2C_SCL      23             // D5
   #define DS18B20_PIN  21             // D3

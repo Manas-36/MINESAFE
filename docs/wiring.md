@@ -41,6 +41,21 @@ The 10 k / 20 k divider keeps the 0–5 V MQ output safe for the 3.3 V pin; the 
 
 **AHT air sensor (v3.1).** Any AHT10 / AHT20 / AHT21 / AHT25 module at I²C address 0x38; the module's own pull-ups are enough, power it from **3V3 only**. `AHT_ENABLED 1` in `repeater_node.ino` reads it every 2 s (driver written in the sketch, no library). The hub shows air temperature, humidity and the worked-out **wet-bulb** temperature on the *Gas & air* and *Network* tabs: warning at 30.5 °C wet-bulb, danger at 33.5 °C, also warning above 35 °C air or 90 % RH. Mount the sensor away from the MQ heater and the board's regulator, which warm the air around them.
 
+## Full body unit on the ESP32-C6-WROOM-1 DevKit
+Board *ESP32C6 Dev Module*. `body_node.ino` picks these pins by itself on that board (the XIAO C6 keeps its own pins). Check the sensors first with `firmware/tests/body_sensor_test`.
+
+| Part | ESP32-C6-WROOM-1 DevKit |
+|---|---|
+| MPU6050 + BMP180 + MAX3010x SDA | GPIO6 |
+| MPU6050 + BMP180 + MAX3010x SCL | GPIO7 |
+| I²C sensors VCC / GND | 3V3 / GND |
+| DS18B20 data (4.7 kΩ to 3V3) | GPIO10 |
+| HW-827 S (analog) | GPIO2 |
+| SOS button (→ GND) | GPIO18 |
+| Red LED (220 Ω) | GPIO19 |
+
+Avoid GPIO8 (on-board RGB LED), GPIO9 (BOOT), GPIO4/5/15 (strapping) and GPIO12/13 (USB). Only GPIO0–6 read analog on the C6.
+
 ## Mock body unit (ESP32-C6 + MPU6050)
 An extra worker for the map demo. Flash `body_node` with `BODY_ID "BODY-02"` and `MOCK_MPU_ONLY 1`; only the MPU6050 is wired (same pins as the body unit's C6 column: SDA GPIO22 / D4, SCL GPIO23 / D5, VCC 3V3, GND). Button (GPIO19) and LED (GPIO18) are optional. The hub shows it as a motion-only worker — no temperature or heart-rate warnings.
 
