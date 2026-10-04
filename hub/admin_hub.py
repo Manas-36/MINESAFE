@@ -1443,24 +1443,31 @@ def index():
 DASHBOARD = r"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Mine Safety Control Room</title>
+<title>MineSafe · Control Room</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=IBM+Plex+Sans:wght@400;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
 <style>
 :root{
-  --bg:#0e1316; --panel:#161d21; --panel2:#1c252a; --line:#2a353b; --ink:#e7eef0; --muted:#8fa2a9;
-  --safe:#35c47c; --warn:#f0b429; --danger:#ff4d4f; --info:#4c9bf0; --nodata:#6b7a80;
-  --font:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; --mono:ui-monospace,Consolas,Menlo,monospace;
+  --bg:#12171A; --panel:#192024; --panel2:#20292E; --line:#2E3A40; --ink:#F3F0E8; --muted:#9DA7AD;
+  --amber:#F2A900; --safe:#35c47c; --warn:#f0b429; --danger:#ff4d4f; --info:#4c9bf0; --nodata:#6b7a80;
+  --font:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --head:Oswald,"Bahnschrift Condensed","Arial Narrow",Impact,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Consolas,Menlo,monospace;
+  --stripe:repeating-linear-gradient(45deg,var(--amber) 0 14px,#12171A 14px 28px);
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);font-size:15px}
 button{font:inherit;cursor:pointer}
 input,select,textarea{font:inherit;color:var(--ink);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 10px;width:100%}
-input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid var(--info);outline-offset:1px}
+input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid var(--amber);outline-offset:1px}
 label{display:grid;gap:5px;font-size:13px;color:var(--muted)}
 .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
 /* top bar */
-.top{position:sticky;top:0;z-index:20;background:#0b1013ee;backdrop-filter:blur(6px);border-bottom:1px solid var(--line)}
+.top{position:sticky;top:0;z-index:20;background:#12171Af2;backdrop-filter:blur(6px);border-bottom:1px solid var(--line)}
+.top::before{content:"";display:block;height:6px;background:var(--stripe)}
 .bar{display:flex;align-items:center;gap:14px;padding:10px 18px;flex-wrap:wrap}
-.brand{font-weight:800;letter-spacing:.04em;font-size:17px;display:flex;align-items:center;gap:8px}
+.brand{font-family:var(--head);font-weight:700;letter-spacing:.08em;font-size:24px;display:flex;align-items:center;gap:10px;line-height:1}
+.brand small{font-family:var(--font);font-size:11px;font-weight:600;letter-spacing:.22em;color:var(--amber);text-transform:uppercase;border-left:1px solid var(--line);padding-left:10px}
 .brand i{width:10px;height:10px;border-radius:50%;background:var(--safe);box-shadow:0 0 10px var(--safe)}
 .chips{display:flex;gap:8px;flex-wrap:wrap}
 .chip{display:flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;background:var(--panel);border:1px solid var(--line);font-size:13px;cursor:pointer}
@@ -1471,13 +1478,15 @@ label{display:grid;gap:5px;font-size:13px;color:var(--muted)}
 .btn:hover{border-color:var(--muted)}
 .btn.red{background:var(--danger);border-color:var(--danger);color:#fff}
 .btn.red:hover{filter:brightness(1.1)}
+.btn.amber{background:var(--amber);border-color:var(--amber);color:#12171A}
 .btn.green{background:var(--safe);border-color:var(--safe);color:#062414}
 .btn.ghost{background:transparent}
 .btn.small{padding:5px 10px;font-size:13px}
 .alertbtn{font-size:16px;padding:10px 18px;letter-spacing:.05em}
 nav{display:flex;gap:4px;padding:0 14px;overflow-x:auto}
 nav button{background:none;border:0;color:var(--muted);padding:10px 12px;border-bottom:2px solid transparent;font-weight:600;white-space:nowrap}
-nav button.on{color:var(--ink);border-bottom-color:var(--info)}
+nav button.on{color:var(--ink);border-bottom-color:var(--amber)}
+nav button:hover{color:var(--ink)}
 nav .n{background:var(--danger);color:#fff;border-radius:999px;padding:0 6px;font-size:11px;margin-left:4px}
 /* alert banner */
 .banner{display:none;background:repeating-linear-gradient(45deg,#7a1416,#7a1416 14px,#8f1a1c 14px,#8f1a1c 28px);padding:12px 18px;align-items:center;gap:16px;flex-wrap:wrap;animation:pulse 1.2s infinite}
@@ -1487,8 +1496,8 @@ nav .n{background:var(--danger);color:#fff;border-radius:999px;padding:0 6px;fon
 @media (prefers-reduced-motion:reduce){.banner{animation:none}}
 main{padding:18px;max-width:1400px;margin:0 auto}
 .view{display:none}.view.on{display:block}
-h2{margin:0 0 12px;font-size:19px}
-h3{margin:0 0 8px;font-size:15px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+h2{margin:0 0 12px;font-family:var(--head);font-weight:500;font-size:24px;letter-spacing:.04em;text-transform:uppercase}
+h3{margin:0 0 8px;font-size:13px;color:var(--amber);text-transform:uppercase;letter-spacing:.14em}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:14px}
 .empty{color:var(--muted);padding:30px;text-align:center;border:1px dashed var(--line);border-radius:12px}
@@ -1621,7 +1630,7 @@ tr.bad td{background:#ff4d4f14}
 .mapwrap{padding:0;overflow:hidden;position:relative}
 .mtools{display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:10px;border-bottom:1px solid var(--line)}
 .mtools .sep{width:1px;align-self:stretch;background:var(--line);margin:0 4px}
-.mtools .btn.on{background:var(--info);border-color:var(--info);color:#fff}
+.mtools .btn.on{background:var(--amber);border-color:var(--amber);color:#12171A}
 .mtools select{width:auto;padding:5px 8px;font-size:13px}
 .mhint{padding:8px 12px;font-size:13px;color:var(--muted);background:var(--panel2);border-bottom:1px solid var(--line);min-height:34px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .mhint b{color:var(--ink)}.mhint input{width:110px;padding:5px 8px}
@@ -1652,11 +1661,27 @@ tr.bad td{background:#ff4d4f14}
 .graw{display:flex;justify-content:space-between;font-size:13px;color:var(--muted)}
 .graw b{color:var(--ink);font-family:var(--mono)}
 .gcard svg{width:100%;height:46px;display:block;background:var(--panel2);border-radius:6px}
+/* splash */
+#splash{position:fixed;inset:0;z-index:100;background:#12171A;display:flex;flex-direction:column;justify-content:center;padding:0 calc(9vw + 24px) 0 9vw;gap:3vh;overflow:hidden;transition:opacity .45s,visibility .45s}
+#splash::after{content:"";position:absolute;top:0;right:0;width:clamp(18px,2.2vw,40px);height:100%;background:var(--stripe)}
+#splash.gone{opacity:0;visibility:hidden}
+#splash .eyebrow{font-size:clamp(11px,1.25vw,20px);letter-spacing:.3em;text-transform:uppercase;color:var(--amber);font-weight:600;opacity:0;animation:rise .6s .9s forwards}
+#splash h1{margin:0;font-family:var(--head);font-weight:700;font-size:clamp(44px,13vw,220px);line-height:.9;letter-spacing:.04em;color:var(--ink);opacity:0;animation:rise .8s .15s forwards}
+#splash p{margin:0;max-width:900px;font-size:clamp(15px,2vw,30px);line-height:1.3;color:#C9D1D6;opacity:0;animation:rise .6s 1s forwards}
+#splash .go{justify-self:start;align-self:flex-start;margin-top:2vh;font-family:var(--head);font-size:clamp(18px,1.8vw,28px);letter-spacing:.12em;text-transform:uppercase;padding:14px 34px;border:0;border-radius:4px;background:var(--amber);color:#12171A;font-weight:700;opacity:0;animation:rise .6s 1s forwards;transition:transform .15s,box-shadow .15s}
+#splash .go:hover{transform:translateX(4px);box-shadow:0 0 0 4px #F2A90033}
+#splash .foot{position:absolute;left:9vw;bottom:5vh;font-size:clamp(11px,1vw,15px);color:var(--muted);opacity:0;animation:rise .6s 1.6s forwards}
+@keyframes rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){#splash *{animation:none!important;opacity:1!important}}
 </style></head>
 <body>
+<div id="splash" role="dialog" aria-label="MineSafe">
+  <h1>MINESAFE</h1>
+  <button class="go" id="go">Get started →</button>
+</div>
 <div class="top">
   <div class="bar">
-    <div class="brand"><i id="live-dot"></i>MINE SAFETY · CONTROL ROOM</div>
+    <div class="brand"><i id="live-dot"></i>MINESAFE<small>Control room</small></div>
     <div class="chips" id="chips"></div>
     <div class="spacer"></div>
     <span class="clock" id="clock">--:--:--</span>
@@ -2569,6 +2594,12 @@ async function poll(){
   polling = false;
 }
 poll(); setInterval(poll, 1000); setInterval(loadHistory, 2000);
+</script>
+<script>
+(function(){const sp=document.getElementById("splash"),go=document.getElementById("go");
+function enter(){sp.classList.add("gone");setTimeout(()=>sp.remove(),500);document.removeEventListener("keydown",key)}
+function key(e){if(e.key==="Enter"||e.key===" "){e.preventDefault();enter()}}
+go.onclick=enter;document.addEventListener("keydown",key);setTimeout(()=>go.focus(),1500)})();
 </script>
 </body></html>
 """

@@ -87,6 +87,7 @@ hardware/
   bom_pilot.csv       parts for the 20-worker pilot design
 docs/
   architecture.md  wiring.md  setup.md  protocol.md  decisions.md
+  wiring/             schematics (SVG + PNG) and the script that draws them
   research/           literature review summary, pilot BOM workbook
   presentation/       slide outline (add the exported PDF here)
   images/             screenshots
@@ -110,9 +111,13 @@ ROADMAP.md            week-by-week plan and to-do list
    - Body unit: set `BODY_ID`, stand still 3 s at power-on.
 3. **Test with a phone:** join the hotspot, open `http://<repeater IP>/` — the phone acts as a worker (fall, SOS, walk on the map).
 
-Full steps: [docs/setup.md](docs/setup.md) · Wiring: [docs/wiring.md](docs/wiring.md) · Packet format: [docs/protocol.md](docs/protocol.md) · Architecture: [docs/architecture.md](docs/architecture.md)
+Full steps: [docs/setup.md](docs/setup.md) · Wiring + schematics: [docs/wiring.md](docs/wiring.md) · Packet format: [docs/protocol.md](docs/protocol.md) · Architecture: [docs/architecture.md](docs/architecture.md)
 
 ## Screenshots
+
+Opening screen of the control room (press **Get started** or Enter):
+
+![Splash](docs/images/splash.png)
 
 | Live | Gas & air | Worker panel |
 |---|---|---|
