@@ -45,6 +45,34 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 
+// ---- print to BOTH the USB socket and the UART/COM socket, so the Serial Monitor
+//      shows output whatever the "USB CDC On Boot" setting or the socket you use ----
+#if ARDUINO_USB_MODE && SOC_USB_SERIAL_JTAG_SUPPORTED
+#include "HWCDC.h"
+#if ARDUINO_USB_CDC_ON_BOOT
+  #define USB_PORT HWCDCSerial
+#else
+  HWCDC UsbPort;
+  #define USB_PORT UsbPort
+#endif
+class DualSerial : public Print {
+ public:
+  void begin(unsigned long baud) {
+    Serial0.begin(baud);
+    USB_PORT.begin();
+    USB_PORT.setTxTimeoutMs(0);             // never block when no USB monitor is open
+  }
+  size_t write(uint8_t c) override { Serial0.write(c); if (USB_PORT) USB_PORT.write(c); return 1; }
+  size_t write(const uint8_t* b, size_t n) override { Serial0.write(b, n); if (USB_PORT) USB_PORT.write(b, n); return n; }
+  int available() { return Serial0.available() + USB_PORT.available(); }
+  int read() { return Serial0.available() ? Serial0.read() : USB_PORT.read(); }
+  operator bool() { return (bool)USB_PORT; }
+};
+DualSerial DualOut;
+#undef Serial
+#define Serial DualOut
+#endif
+
 // ------------------------- CONFIG ------------------------------------
 const char* BODY_ID = "BODY-01";      // must match the "Body ESP code" on the admin page
 
