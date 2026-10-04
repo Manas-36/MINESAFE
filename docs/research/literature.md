@@ -12,6 +12,21 @@ From *Assignment 1 — Research Analysis and Problem Statement* (31 Jul 2026) an
 | DGMS guidance | Missing chin-strap helmets, harnesses and safety footwear named as recurring root causes; PPE non-compliance is a contributing factor that is rarely counted separately |
 | UWB localisation literature | Underground mines are GPS-denied and communication-limited, which delays locating an injured worker |
 
+### Real accidents behind the numbers
+| When | Where | What happened | MineSafe feature | Source |
+|---|---|---|---|---|
+| 6 Jan 2025 | Umrangso, Assam | Rat-hole mine flooded, at least 9 trapped; divers searched for days | Entry log + last known position | [AP](https://www.ksat.com/news/world/2025/01/07/at-least-9-miners-are-trapped-in-a-coal-mine-in-indias-northeastern-assam-state/), [AIR](https://www.newsonair.gov.in/rescue-operations-continue-at-assams-umrangso-mine-3-bodies-recovered-after-150-hours) |
+| 14 May 2024 | Kolihan, Rajasthan | Cage rope snapped, 15 trapped overnight, 1 died | Fall alarm + vitals + location | [Deccan Herald](https://www.deccanherald.com/india/rajasthan/all-15-hindustan-copper-limited-officials-rescued-from-collapsed-lift-at-rajasthans-kolihan-mine-3023138) |
+| 13 Dec 2018 | Ksan, Meghalaya | 15 trapped by flooding; ~80-day search, 2 bodies recovered | Position reaches the surface via repeaters | [Wikipedia](https://en.wikipedia.org/wiki/2018_Meghalaya_mining_accident) |
+| 22 Feb 2025 | SLBC tunnel, Telangana | 8 trapped; radar needed to find them | GPS-free last known position | [Deccan Herald](https://www.deccanherald.com/amp/story/india%2Ftelangana%2Ftelangana-tunnel-collapse-whereabouts-of-four-trapped-persons-located-says-state-minister-krishna-rao-3427625) |
+| 2020–24 | India | 226 deaths in coal + lignite mines (53 in 2024), Rajya Sabha | — | [ETV Bharat](https://www.etvbharat.com/en/!bharat/parliament-coal-and-mines-deaths-lignite-rajya-sabha-enn25031704125) |
+| 30 Jul 2026 | Quetta, Pakistan | Methane explosion, 34 killed; mines lack gas monitoring | MQ gas per repeater + auto alert | [AP / TimesLIVE](https://www.timeslive.co.za/news/world/2026-07-31-34-miners-killed-in-a-methane-explosion-at-a-coal-mine-in-southwestern-pakistan/) |
+| 28 Oct 2023 | Kostenko, Kazakhstan | Methane explosion and fire, 46 killed | Gas on one screen + one-button alert | [Wikipedia](https://en.wikipedia.org/wiki/Kostenko_mine_disaster) |
+| 14 Oct 2022 | Amasra, Turkey | Methane explosion, 41 killed | Continuous gas trend | [NPR](https://www.mprnews.org/story/2022/10/15/npr-coal-mine-blast-turkey-25-killed) |
+| 13 May 2014 | Soma, Turkey | Fire, carbon monoxide, 301 killed at shift change | Who is underground + CO sensing | [Wikipedia](https://en.wikipedia.org/wiki/Soma_mine_disaster) |
+| 5 Aug 2010 | San José, Chile | 33 trapped; found alive only after 17 days | "I'm OK" + heart rate to the surface | [Britannica](https://www.britannica.com/event/Chile-mine-rescue-of-2010) |
+| 2 Jan 2006 | Sago, USA | 12 died; led to rules requiring underground communication and tracking | Two-way alert + location | [Wikipedia](https://en.wikipedia.org/wiki/Sago_Mine_disaster), [MSHA](https://www.msha.gov/compliance-and-enforcement/equipment-approval-certification/communications-and-tracking-underground-mines) |
+
 ## 2. What the literature says (four research streams)
 
 | Stream | State of the art | What is missing |
