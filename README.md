@@ -57,6 +57,8 @@ Raw double integration of acceleration drifts by ~175 m in a minute, so MineSafe
 
 ## Progress
 
+**Major versions:** [V1](docs/v1.md) Wi-Fi + cloud, no website → [V2](docs/v2.md) ESP-NOW chain + control-room website → **[V3](docs/v3.md) camera entry station + mock worker (now)** → V4 final + Zigbee
+
 **42 / 59 tasks done · Week 9 of 14** `████████████████████░░░░░░░░░░` → full week-by-week plan, Gantt chart and checklist in **[ROADMAP.md](ROADMAP.md)**
 
 | Version | Milestone | Status |
@@ -92,7 +94,7 @@ hardware/
   bom_prototype.csv   parts for the built prototype
   bom_pilot.csv       parts for the 20-worker pilot design
 docs/
-  v3.md  architecture.md  wiring.md  setup.md  protocol.md  decisions.md
+  v1.md v2.md v3.md  architecture.md  wiring.md  setup.md  protocol.md  decisions.md
   wiring/             schematics (SVG + PNG) and the script that draws them
   research/           literature review, competitor analysis, pilot design, original reports (source/)
   presentation/       slide outline (add the exported PDF here)
