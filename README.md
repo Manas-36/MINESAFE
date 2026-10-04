@@ -1,9 +1,13 @@
-# MineSafe ⛑️
+<div align="center">
 
-**Intelligent Safety Gear Compliance, Health Monitoring and Navigation System for Miners**
+<img src="docs/images/logo.png" alt="MineSafe logo" width="360">
+
+**Intelligent Safety Gear Compliance, Health Monitoring and Navigation System for Miners**<br>
 Capstone project · B.E. Mechanical and Mechatronics Engineering · Thakur College of Engineering and Technology (TCET), Mumbai · 2026–27
 
-[![Progress](https://img.shields.io/badge/progress-68%25-F2A900?style=flat-square)](ROADMAP.md) [![Week](https://img.shields.io/badge/now-week_9_of_14-1f6feb?style=flat-square)](ROADMAP.md) [![Version](https://img.shields.io/badge/version-v1.0-2ea44f?style=flat-square)](CHANGELOG.md) ![ESP32](https://img.shields.io/badge/ESP32-ESP--NOW-E7352C?style=flat-square&logo=espressif&logoColor=white) ![Python](https://img.shields.io/badge/hub-Flask-3776AB?style=flat-square&logo=python&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)](LICENSE)
+[![Progress](https://img.shields.io/badge/progress-71%25-F2A900?style=flat-square)](ROADMAP.md) [![Week](https://img.shields.io/badge/now-week_9_of_14-1f6feb?style=flat-square)](ROADMAP.md) [![Version](https://img.shields.io/badge/version-v1.0-2ea44f?style=flat-square)](CHANGELOG.md) ![ESP32](https://img.shields.io/badge/ESP32-ESP--NOW-E7352C?style=flat-square&logo=espressif&logoColor=white) ![Python](https://img.shields.io/badge/hub-Flask-3776AB?style=flat-square&logo=python&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)](LICENSE)
+
+</div>
 
 MineSafe checks a miner's safety kit at the gate, watches their health and movement underground, shows where they are on a tunnel map, and lets the control room warn everyone in seconds — **without GPS, internet or cabling**.
 
@@ -13,7 +17,7 @@ MineSafe checks a miner's safety kit at the gate, watches their health and movem
 
 ## The problem
 
-Underground there is no GPS and no mobile network. The control room cannot see a worker's condition or position, kit checks at the gate are manual, and gas, falls and heat stress are usually discovered after the fact. Existing tools each solve one piece (gas detectors, RFID gates, smart helmets, CCTV PPE detection); our competitive analysis of nine commercial products found none that combines AI kit compliance, continuous health monitoring and GPS-free location in one underground system.
+In 2024 DGMS recorded **38 fatal accidents in Indian coal mines and 32 in metalliferous mines**; fall of ground, fall of person and powered haulage lead the list. Underground there is no GPS and no mobile network. The control room cannot see a worker's condition or position, kit checks at the gate are manual, and gas, falls and heat stress are usually discovered after the fact. Existing tools each solve one piece (gas detectors, RFID gates, smart helmets, CCTV PPE detection); our [competitive analysis of nine commercial products](docs/research/competitors.md) found none that combines AI kit compliance, continuous health monitoring and GPS-free location in one underground system.
 
 ## How it works
 
@@ -53,7 +57,7 @@ Raw double integration of acceleration drifts by ~175 m in a minute, so MineSafe
 
 ## Progress
 
-**38 / 56 tasks done · Week 9 of 14** `████████████████████░░░░░░░░░░` → full week-by-week plan, Gantt chart and checklist in **[ROADMAP.md](ROADMAP.md)**
+**40 / 56 tasks done · Week 9 of 14** `████████████████████░░░░░░░░░░` → full week-by-week plan, Gantt chart and checklist in **[ROADMAP.md](ROADMAP.md)**
 
 | Version | Milestone | Status |
 |---|---|---|
@@ -88,7 +92,7 @@ hardware/
 docs/
   architecture.md  wiring.md  setup.md  protocol.md  decisions.md
   wiring/             schematics (SVG + PNG) and the script that draws them
-  research/           literature review summary, pilot BOM workbook
+  research/           literature review, competitor analysis, pilot design, original reports (source/)
   presentation/       slide outline (add the exported PDF here)
   images/             screenshots
 CHANGELOG.md          version-by-version progress

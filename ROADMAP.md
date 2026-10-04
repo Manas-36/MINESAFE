@@ -4,13 +4,13 @@
 
 **Week-by-week progress of the capstone — from research to final review**
 
-![Progress](https://img.shields.io/badge/progress-68%25-F2A900?style=for-the-badge)
-![Done](https://img.shields.io/badge/done-38-2ea44f?style=for-the-badge)
-![In progress](https://img.shields.io/badge/in_progress-2-fb8c00?style=for-the-badge)
+![Progress](https://img.shields.io/badge/progress-71%25-F2A900?style=for-the-badge)
+![Done](https://img.shields.io/badge/done-40-2ea44f?style=for-the-badge)
+![In progress](https://img.shields.io/badge/in_progress-0-fb8c00?style=for-the-badge)
 ![To do](https://img.shields.io/badge/to_do-16-6e7781?style=for-the-badge)
 ![Week](https://img.shields.io/badge/now-week_9_of_14-1f6feb?style=for-the-badge)
 
-`████████████████████░░░░░░░░░░`  **38 / 56 tasks**
+`█████████████████████░░░░░░░░░`  **40 / 56 tasks**
 
 </div>
 
@@ -30,7 +30,7 @@
 | ✅ | 06 | 7 Sep – 13 Sep | 📡 Zigbee → ESP-NOW, repeater chain, AI, gas | `v0.4` | `██████████` 4/4 |
 | ✅ | 07 | 14 Sep – 20 Sep | 🔗 Multi-hop chain + alert propagation | `v0.4` | `██████████` 3/3 |
 | ✅ | 08 | 21 Sep – 27 Sep | 🎯 First end-to-end run | `v0.5` | `██████████` 4/4 |
-| 🔄 | **09** ◀ now | 28 Sep – 4 Oct | 🗺️ Map tracking, gas analysis, real sensors, docs | `v0.6 / v1.0` | `████████░░` 11/13 |
+| ✅ | **09** ◀ now | 28 Sep – 4 Oct | 🗺️ Map tracking, gas analysis, real sensors, docs | `v0.6 / v1.0` | `██████████` 13/13 |
 | ⏳ | 10 | 5 Oct – 11 Oct | 🧪 Body unit bench test + calibration | `v1.1` | `░░░░░░░░░░` 0/4 |
 | ⏳ | 11 | 12 Oct – 18 Oct | 🤖 AI kit dataset + entry flow + kit-removal | `v1.2` | `░░░░░░░░░░` 0/3 |
 | ⏳ | 12 | 19 Oct – 25 Oct | 🔋 Power, enclosure, range test | `v1.3` | `░░░░░░░░░░` 0/3 |
@@ -57,7 +57,7 @@ gantt
     W07 Multi-hop chain and alert propagation :done, w7, 2026-09-14, 7d
     W08 First end-to-end run :done, w8, 2026-09-21, 7d
     section Body unit, map & docs
-    W09 Map tracking gas analysis real sensors docs :active, w9, 2026-09-28, 7d
+    W09 Map tracking gas analysis real sensors docs :done, w9, 2026-09-28, 7d
     section Testing & hardware
     W10 Body unit bench test and calibration : w10, 2026-10-05, 7d
     W11 AI kit dataset and entry flow and kit-removal : w11, 2026-10-12, 7d
@@ -145,7 +145,7 @@ gantt
 </details>
 
 <details open>
-<summary>🗺️ <b>Week 09</b> · 28 Sep – 4 Oct · Map tracking, gas analysis, real sensors, docs · <code>v0.6 / v1.0</code> · 11/13 · <b>◀ now</b></summary>
+<summary>🗺️ <b>Week 09</b> · 28 Sep – 4 Oct · Map tracking, gas analysis, real sensors, docs · <code>v0.6 / v1.0</code> · 13/13 · <b>◀ now</b></summary>
 
 - [x] Tunnel map + GPS-free tracking (steps, heading, repeater check-points) — <sub>Location & map</sub>
 - [x] Direction-aware map snapping + demo walker — <sub>Location & map</sub>
@@ -158,8 +158,8 @@ gantt
 - [x] Add guide name and branch to deck, Notion and GitHub — <sub>Docs & review</sub>
 - [x] Wiring schematics for every unit (SVG + PNG) — <sub>Hardware</sub>
 - [x] Admin themed like the deck + MINESAFE opening screen — <sub>Control room</sub>
-- [ ] Add DGMS accident statistic to the deck — <sub>Docs & review</sub> *(in progress)*
-- [ ] Attach literature review document to References — <sub>Docs & review</sub> *(in progress)*
+- [x] Add DGMS accident statistic to the deck — <sub>Docs & review</sub>
+- [x] Attach literature review document to References — <sub>Docs & review</sub>
 
 </details>
 
@@ -224,7 +224,7 @@ gantt
 | Gas | 2 | 0 | `██████████` 100 % |
 | Body unit | 3 | 3 | `█████░░░░░` 50 % |
 | Location & map | 2 | 1 | `███████░░░` 67 % |
-| Docs & review | 4 | 6 | `████░░░░░░` 40 % |
+| Docs & review | 6 | 4 | `██████░░░░` 60 % |
 
 ## 🏷️ Versions
 
