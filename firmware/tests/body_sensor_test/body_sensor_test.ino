@@ -19,7 +19,8 @@
 //    Button   GPIO18 -> button -> GND                  [GPIO5]
 //    LED      GPIO19 -> 220R -> LED long leg, short leg GND   [GPIO6]
 //
-//  SERIAL COMMANDS: s = scan / check all again, l = LED on/off, q = quiet (stop live lines)
+//  SERIAL COMMANDS: s = check all again, f = find which pins the sensors are really on,
+//                   l = LED on/off, q = quiet (stop live lines)
 // =====================================================================
 #include <Wire.h>
 #include "driver/gpio.h"
@@ -257,10 +258,76 @@ uint16_t pMin = 4095, pMax = 0;
 uint32_t pressCount = 0;
 bool lastBtn = false;
 
+
+// Pull-up check: a powered sensor module pulls SDA/SCL (and the DS18B20 4.7k pulls its data line)
+// up to 3V3. With the ESP's weak pull-DOWN on, a connected + powered line still reads HIGH,
+// a loose or unpowered line reads LOW. This tells us WHERE the wiring is broken.
+bool lineHigh(int pin) {
+  pinMode(pin, INPUT_PULLDOWN);
+  delay(5);
+  bool h = digitalRead(pin);
+  pinMode(pin, INPUT);
+  return h;
+}
+void lineCheck() {
+  Wire.end();
+  bool sda = lineHigh(I2C_SDA), scl = lineHigh(I2C_SCL), ds = lineHigh(DS_PIN);
+  Serial.printf("Wire check (HIGH = wire reaches a powered sensor):  SDA GPIO%d %s | SCL GPIO%d %s | DS18B20 GPIO%d %s\n",
+                I2C_SDA, sda ? "HIGH ok" : "LOW <- broken", I2C_SCL, scl ? "HIGH ok" : "LOW <- broken",
+                DS_PIN, ds ? "HIGH ok" : "LOW <- broken");
+  if (!sda && !scl && !ds)
+    Serial.println("  -> ALL LOW: the sensors get no 3V3/GND (breadboard rail gap? wire on 5V/GPIO instead of 3V3?)\n"
+                   "     or the wires are on other pins. Type f to search every pin for the sensors.");
+  else if (!sda || !scl)
+    Serial.println("  -> one I2C line LOW: that wire is loose or on the wrong pin (type f to find it)");
+}
+
+// f: try every free GPIO pair as SDA/SCL and every pin for the DS18B20, report where the parts really are
+const int FREE_PINS[] =
+#if CONFIG_IDF_TARGET_ESP32C6 && !defined(ARDUINO_XIAO_ESP32C6)
+  {0, 1, 2, 3, 4, 5, 6, 7, 10, 11, 15, 18, 19, 20, 21, 22, 23};
+#elif CONFIG_IDF_TARGET_ESP32C6
+  {0, 1, 2, 18, 19, 20, 21, 22, 23};
+#else
+  {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 21, 38, 39, 40, 41, 42, 47, 48};
+#endif
+void findPins() {
+  Serial.println("\nSearching every pin pair for I2C sensors (takes ~20 s)...");
+  Wire.end();
+  int hits = 0;
+  for (int a : FREE_PINS) for (int b : FREE_PINS) {
+    if (a == b || a == BUTTON_PIN || b == BUTTON_PIN || a == LED_PIN || b == LED_PIN) continue;
+    if (!Wire.begin(a, b, 100000)) continue;
+    Wire.setTimeOut(5);
+    String found;
+    for (uint8_t ad : {0x57, 0x68, 0x69, 0x77}) if (present(ad)) found += String(" 0x") + String(ad, HEX);
+    Wire.end();
+    if (found.length()) { Serial.printf("  FOUND:%s  with SDA = GPIO%d, SCL = GPIO%d\n", found.c_str(), a, b); hits++; }
+  }
+  if (!hits) Serial.println("  no I2C sensor on any pin pair -> the sensors are NOT POWERED (check 3V3 + GND with a meter)");
+  Serial.println("Searching every pin for the DS18B20...");
+  bool dsHit = false;
+  for (int p : FREE_PINS) {
+    if (p == BUTTON_PIN || p == LED_PIN) continue;
+    pinMode(p, OUTPUT_OPEN_DRAIN | PULLUP);
+    gpio_num_t g = (gpio_num_t)p;
+    gpio_set_level(g, 0); delayMicroseconds(480);
+    gpio_set_level(g, 1); delayMicroseconds(70);
+    bool pres = gpio_get_level(g) == 0;
+    delayMicroseconds(410);
+    pinMode(p, INPUT);
+    if (pres) { Serial.printf("  FOUND: DS18B20 answers on GPIO%d\n", p); dsHit = true; }
+  }
+  if (!dsHit) Serial.println("  DS18B20 not found on any pin -> check its 3V3/GND and the 4.7k resistor");
+  Serial.println("Done. Move the wires to the pins in the WIRING list (or tell Claude which pins were found).\n");
+  checkAll();
+}
+
 void checkAll() {
   Serial.printf("\n==== MineSafe body sensor test - %s ====\n", BOARD_NAME);
   Serial.printf("I2C SDA GPIO%d  SCL GPIO%d | DS18B20 GPIO%d | HW-827 GPIO%d | button GPIO%d | LED GPIO%d\n",
                 I2C_SDA, I2C_SCL, DS_PIN, PULSE_PIN, BUTTON_PIN, LED_PIN);
+  lineCheck();
   Wire.end();
   Wire.begin(I2C_SDA, I2C_SCL);
   Wire.setClock(100000);
@@ -303,6 +370,7 @@ void loop() {
   if (Serial.available()) {
     char c = Serial.read();
     if (c == 's') checkAll();
+    if (c == 'f') findPins();
     if (c == 'l') { ledOn = !ledOn; Serial.printf("LED forced %s\n", ledOn ? "ON" : "blinking"); }
     if (c == 'q') { quiet = !quiet; Serial.println(quiet ? "quiet" : "live"); }
   }
