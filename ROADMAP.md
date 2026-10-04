@@ -31,11 +31,11 @@
 | ✅ | 07 | 14 Sep – 20 Sep | 🔗 Multi-hop chain + alert propagation | `v0.4` | `██████████` 3/3 |
 | ✅ | 08 | 21 Sep – 27 Sep | 🎯 First end-to-end run | `v0.5` | `██████████` 4/4 |
 | ✅ | **09** ◀ now | 28 Sep – 4 Oct | 🗺️ Map tracking, gas analysis, real sensors, docs | `v0.6 / v1.0` | `██████████` 13/13 |
-| 🔄 | 10 | 5 Oct – 11 Oct | 🧪 Body unit bench test + calibration | `v1.1` | `███░░░░░░░` 2/6 |
-| ⏳ | 11 | 12 Oct – 18 Oct | 🤖 AI kit dataset + entry flow + kit-removal | `v1.2` | `░░░░░░░░░░` 0/3 |
-| ⏳ | 12 | 19 Oct – 25 Oct | 🔋 Power, enclosure, range test | `v1.3` | `░░░░░░░░░░` 0/3 |
-| ⏳ | 13 | 26 Oct – 1 Nov | 🎬 Full system trial + demo video | `v1.4` | `░░░░░░░░░░` 0/3 |
-| ⏳ | 14 | 2 Nov – 8 Nov | 🏁 Report, final review, release | `v2.0` | `░░░░░░░░░░` 0/4 |
+| 🔄 | 10 | 5 Oct – 11 Oct | 🧪 V3: camera entry station, mock worker, bench test | `v3.0` | `███░░░░░░░` 2/6 |
+| ⏳ | 11 | 12 Oct – 18 Oct | 🤖 AI kit dataset + entry flow + kit-removal | `v3.1` | `░░░░░░░░░░` 0/3 |
+| ⏳ | 12 | 19 Oct – 25 Oct | 🔋 Power, enclosure, range test | `v3.2` | `░░░░░░░░░░` 0/3 |
+| ⏳ | 13 | 26 Oct – 1 Nov | 🎬 Full system trial + demo video | `v3.3` | `░░░░░░░░░░` 0/3 |
+| ⏳ | 14 | 2 Nov – 8 Nov | 🏁 Report, final review, release | `v4.0` | `░░░░░░░░░░` 0/4 |
 
 ## 🗓️ Timeline
 
@@ -59,7 +59,7 @@ gantt
     section Body unit, map & docs
     W09 Map tracking gas analysis real sensors docs :done, w9, 2026-09-28, 7d
     section Testing & hardware
-    W10 Body unit bench test and calibration : w10, 2026-10-05, 7d
+    W10 V3  camera entry station mock worker bench test : w10, 2026-10-05, 7d
     W11 AI kit dataset and entry flow and kit-removal : w11, 2026-10-12, 7d
     W12 Power enclosure range test : w12, 2026-10-19, 7d
     section Final
@@ -164,7 +164,7 @@ gantt
 </details>
 
 <details open>
-<summary>🧪 <b>Week 10</b> · 5 Oct – 11 Oct · Body unit bench test + calibration · <code>v1.1</code> · 2/6</summary>
+<summary>🧪 <b>Week 10</b> · 5 Oct – 11 Oct · V3: camera entry station, mock worker, bench test · <code>v3.0</code> · 2/6</summary>
 
 - [x] Entry station v3: XIAO S3 Sense camera + PHOTO button + /api/camphoto — <sub>Entry station</sub>
 - [x] Mock worker: ESP32-C6 + MPU6050 (MOCK_MPU_ONLY) — <sub>Body unit</sub>
@@ -176,7 +176,7 @@ gantt
 </details>
 
 <details>
-<summary>🤖 <b>Week 11</b> · 12 Oct – 18 Oct · AI kit dataset + entry flow + kit-removal · <code>v1.2</code> · 0/3</summary>
+<summary>🤖 <b>Week 11</b> · 12 Oct – 18 Oct · AI kit dataset + entry flow + kit-removal · <code>v3.1</code> · 0/3</summary>
 
 - [ ] Collect reference photos and test AI kit check accuracy — <sub>Control room</sub> 🔴
 - [ ] Full entry flow: RFID scan + photo + approve + pair body unit — <sub>Entry station</sub> 🔴
@@ -185,7 +185,7 @@ gantt
 </details>
 
 <details>
-<summary>🔋 <b>Week 12</b> · 19 Oct – 25 Oct · Power, enclosure, range test · <code>v1.3</code> · 0/3</summary>
+<summary>🔋 <b>Week 12</b> · 19 Oct – 25 Oct · Power, enclosure, range test · <code>v3.2</code> · 0/3</summary>
 
 - [ ] Battery + charger for body unit, measure battery life — <sub>Hardware</sub> 🔴
 - [ ] Enclosures for body unit and repeaters (3D print) — <sub>Hardware</sub>
@@ -194,7 +194,7 @@ gantt
 </details>
 
 <details>
-<summary>🎬 <b>Week 13</b> · 26 Oct – 1 Nov · Full system trial + demo video · <code>v1.4</code> · 0/3</summary>
+<summary>🎬 <b>Week 13</b> · 26 Oct – 1 Nov · Full system trial + demo video · <code>v3.3</code> · 0/3</summary>
 
 - [ ] Full trial: 3 repeaters, body unit, phone workers, gas test — <sub>Testing</sub> 🔴
 - [ ] Record demo video, add photos to GitHub and Notion — <sub>Docs & review</sub>
@@ -203,11 +203,11 @@ gantt
 </details>
 
 <details>
-<summary>🏁 <b>Week 14</b> · 2 Nov – 8 Nov · Report, final review, release · <code>v2.0</code> · 0/4</summary>
+<summary>🏁 <b>Week 14</b> · 2 Nov – 8 Nov · Report, final review, release · <code>v4.0</code> · 0/4</summary>
 
 - [ ] Write project report — <sub>Docs & review</sub> 🔴
 - [ ] Final presentation rehearsal and viva questions — <sub>Docs & review</sub> 🔴
-- [ ] Release v2.0 on GitHub — <sub>Docs & review</sub>
+- [ ] Release v4.0 (final) on GitHub — <sub>Docs & review</sub>
 - [ ] Plan Zigbee (802.15.4) migration on ESP32-C6 nodes — <sub>Network</sub>
 
 </details>
@@ -240,7 +240,8 @@ timeline
     Early Sep : v0.3 Control room v3 : v0.4 ESP-NOW repeater chain, AI, gas
     Late Sep : v0.5 First end-to-end run
     Oct wk 1 : v0.6 Map tracking, gas analysis, real sensors : v1.0 Repo, docs, slides, Notion
-    Oct–Nov : v1.1–v1.4 Bench test, AI dataset, power, full trial : v2.0 Final release
+    Oct wk 2 : V3 (v3.0) Camera entry station, mock worker, schematics
+    Oct–Nov : v3.1–v3.3 AI dataset, power, full trial : v4.0 Final release, Zigbee next
 ```
 
 <div align="center"><sub>Manas Pednekar · Amey Satale · Aaryaa Kanojia · Guide: Mr Dipesh Tare, Assistant Professor<br>Mechanical and Mechatronics Engineering · TCET Mumbai · 2026–27</sub></div>

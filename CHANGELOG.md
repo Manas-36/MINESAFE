@@ -2,6 +2,8 @@
 
 Each version is one commit on `main` and has its own branch, `version/v0.0` … `version/v1.0` — pick it from the branch menu on GitHub (or `git checkout version/v0.3`) to see the project at that stage. The history was assembled on 3 Oct 2026 from the files saved during development; dates are approximate.
 
+**Major versions:** **V1** = entry station + hub (v0.1–v0.3) · **V2** = ESP-NOW repeater chain, body unit, tunnel map (v0.4–v1.0) · **V3** = camera entry station + mock worker (v3.0) · **V4** = final release, then Zigbee.
+
 | Version | When | Milestone |
 |---|---|---|
 | [v0.0](#v00--research-and-design) | Aug–Sep 2026 | Research, competitive analysis, architecture, pilot BOM |
@@ -12,7 +14,7 @@ Each version is one commit on `main` and has its own branch, `version/v0.0` … 
 | [v0.5](#v05--end-to-end-chain-working) | 1–2 Oct 2026 | First end-to-end run: phone worker, body unit, alerts, buzzer |
 | [v0.6](#v06--map-gas-analysis-real-sensors) | 3 Oct 2026 | Tunnel map + GPS-free tracking, gas analysis, real body sensors |
 | [v1.0](#v10--documentation-release) | 3 Oct 2026 | Structured repo, docs, presentation, Notion |
-| [v1.1](#v11--camera-entry-station-mock-worker-schematics) | 4 Oct 2026 | Camera entry station, mock worker, schematics, admin theme, research docs |
+| [**V3 · v3.0**](#v3--v30--camera-entry-station-mock-worker-schematics) | 4 Oct 2026 | Camera entry station, mock worker, schematics, admin theme, research docs |
 
 ---
 
@@ -67,7 +69,9 @@ Each version is one commit on `main` and has its own branch, `version/v0.0` … 
 - [ ] Kit-removal sensing (helmet IR sensor, vest buckle reed switch)
 - [ ] Battery, enclosure, demo video
 
-## v1.1 — Camera entry station, mock worker, schematics
+## V3 · v3.0 — Camera entry station, mock worker, schematics
+Branch: [`version/v3.0`](https://github.com/Manas-36/MINESAFE/tree/version/v3.0) · flashing guide: [`docs/v3.md`](docs/v3.md)
+
 Hardware set for the prototype demo (all ESP-NOW; Zigbee planned later — see decision 13):
 body unit **ESP32-S3 N16R8** · repeaters **XIAO ESP32-C6** (main one on Wi-Fi to the hub) · **mock body unit** ESP32-C6 + MPU6050 · phone test worker · entry station **XIAO ESP32-S3 Sense**.
 - `firmware/entry_station` v3: camera + **PHOTO button (D3)** — countdown, SVGA JPEG, `POST /api/camphoto` with the scanned tags; OLED shows the AI kit-check verdict. Hub auto-find on the hotspot subnet. Still builds for the XIAO C6 (no camera).
