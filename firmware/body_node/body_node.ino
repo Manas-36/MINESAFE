@@ -766,6 +766,8 @@ void setup() {
   digitalWrite(14, USE_EXTERNAL_ANTENNA ? HIGH : LOW);
 #endif
   Serial.begin(115200);
+  uint32_t t0 = millis();
+  while (!Serial && millis() - t0 < 4000) delay(10);          // native USB: wait up to 4 s for the Serial Monitor
   pinMode(LED_PIN, OUTPUT);
   pinMode(BUTTON_PIN, INPUT_PULLUP);
   digitalWrite(LED_PIN, HIGH);                                 // LED on = keep still, calibrating
@@ -832,6 +834,15 @@ void loop() {
   bool changed = handleButton(now);
   updateLed(now);
 
+  static uint32_t lastStatus = 0;                           // a status line every 5 s, so the monitor is never silent
+  if (now - lastStatus >= 5000) {
+    lastStatus = now;
+    Serial.printf("[%s] %s | MPU %s  BMP %s  temp %s  HR %u bpm%s | steps %u  sent #%lu\n", BODY_ID,
+                  nearRep ? ("REP-" + String(nearRep < 10 ? "0" : "") + String(nearRep) + " ch " + String(channel)).c_str()
+                          : ("searching, ch " + String(channel)).c_str(),
+                  mpuOk ? "ok" : "--", bmpOk ? "ok" : "--", isnan(dsTemp) ? "--" : (String(dsTemp, 1) + " C").c_str(),
+                  (unsigned)beat.bpm, finger ? "" : " (no finger)", steps, (unsigned long)seqNo);
+  }
   if (changed || now - lastSend >= SEND_EVERY_MS) {         // every second, and at once on SOS
     lastSend = now;
     sendTelemetry(now);
