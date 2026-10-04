@@ -11,7 +11,7 @@
 | 5 | Check at the gate. Watch underground. Warn instantly. | Our solution |
 | 6 | System architecture | Overview |
 | 7 | A worker's shift, step by step | Process flow |
-| 8 | A working demo for about ₹6,500 | BOM |
+| 8 | A working demo for about ₹6,700 | BOM |
 | 9 | What the miner wears | Technical |
 | 10 | Wiring: one I2C bus plus four single pins | Technical |
 | 11 | A radio chain that builds itself | Technical |
@@ -26,3 +26,5 @@
 | 20 | Knowing when kit comes off underground | Extension |
 | 21 | Where MineSafe goes next | Future scope |
 | 22 | Thank you — questions and live demo | |
+
+**v3.1 update (4 Oct 2026):** AHT air sensor added — slide 6 (hub box), 8 (BOM: AHT20 ₹120 per repeater, total ≈ ₹6,730), 11 (repeater bullet + wiring line), 14 (Gas + air card, wet-bulb limits), 16 (Gas & air tab).

@@ -380,7 +380,7 @@ def system():
     s.wire([(1335, 200), (1335, 300)], "SCL", 3); s.text(1345, 255, "Wi-Fi", 11.5, NET["SCL"], weight=700)
     s.wire([(1335, 480), (1335, 390)], "SCL", 3); s.text(1345, 440, "Wi-Fi", 11.5, NET["SCL"], weight=700)
     for x in (450, 730, 1020):
-        s.box(x - 60, 470, 120, 50, "MQ + buzzer", "", fill="#fff")
+        s.box(x - 90, 470, 180, 50, "MQ · AHT · buzzer", "", fill="#fff")
         s.wire([(x, 390), (x, 470)], "RF", 2)
     s.note(60, 120, ["Packet: 54 bytes / worker / second (MS_VER 3)",
                      "Up: telemetry hops to the main repeater, then HTTP POST to /api/telemetry.",
