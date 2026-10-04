@@ -23,6 +23,7 @@ Detailed git versions below (v0.0–v1.0 make up V2).
 | [v0.6](#v06--map-gas-analysis-real-sensors) | 3 Oct 2026 | Tunnel map + GPS-free tracking, gas analysis, real body sensors |
 | [v1.0](#v10--documentation-release) | 3 Oct 2026 | Structured repo, docs, presentation, Notion |
 | [**V3 · v3.0**](#v3--v30--camera-entry-station-mock-worker-schematics) | 4 Oct 2026 | Camera entry station, mock worker, schematics, admin theme, research docs |
+| [v3.1](#v31--aht-air-temperature--humidity-on-repeaters) | 4 Oct 2026 | AHT air temperature + humidity on every repeater, shown in the admin |
 
 ---
 
@@ -76,6 +77,12 @@ Detailed git versions below (v0.0–v1.0 make up V2).
 - [ ] Entry station connected to the hub over Wi-Fi
 - [ ] Kit-removal sensing (helmet IR sensor, vest buckle reed switch)
 - [ ] Battery, enclosure, demo video
+
+## v3.1 — AHT air temperature + humidity on repeaters
+- `firmware/repeater_node`: AHT10/20/25 on I²C (XIAO C6 SDA D4 / SCL D5, ESP32-S3 GPIO8 / 9), own non-blocking driver, `AHT_ENABLED`; reading every 2 s; sent in the repeater status (`airT`, `airH` appended — V2 repeaters still decode) and as `air_t` / `air_h` in the hub JSON; phone test page shows it; Serial `a` command.
+- `hub/admin_hub.py`: stores air temperature / humidity history per repeater, works out wet-bulb temperature (Stull formula); **Air** panel on each *Gas & air* card, **Air (AHT)** column + chain line on *Network*, top-bar chip; heat warnings (wet-bulb 30.5 / 33.5 °C, air 35 °C, humidity 90 %) logged in the *Incident log*.
+- `tools/sim_repeater.py`: simulated repeaters send air readings (warmer deeper in the mine).
+- Repeater schematic, `docs/wiring.md`, `docs/v3.md`, `docs/protocol.md` updated.
 
 ## V3 · v3.0 — Camera entry station, mock worker, schematics
 Branch: [`version/v3.0`](https://github.com/Manas-36/MINESAFE/tree/version/v3.0) · flashing guide: [`docs/v3.md`](docs/v3.md)

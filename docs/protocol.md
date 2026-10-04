@@ -37,7 +37,9 @@ Header: `senderHop`, `kind` (1 body telemetry, 2 repeater status), `bodyRssi`, `
              "hu":65535,"st":42,"hd":900,"al":-30,"hr":78,"sp":97,"path":["REP-02","REP-01"]}],
  "statuses":[{"id":"REP-02","hop":1,"parent":"REP-01","prssi":-70,"alert_id":0,"buzzing":false,
               "up":300,"bodies":120,"nbrs":2,"gas_mv":820,"gas_warm":false,"gas_alarm":false,
-              "gas_missing":false,"path":["REP-02","REP-01"]}],
+              "gas_missing":false,"path":["REP-02","REP-01"],"air_t":29.84,"air_h":76.20}],
  "alert_id":0,"buzzing":false,"wifi_rssi":-50,"esp_ch":6,"ip":"10.180.64.239","uptime":300}
 ```
+`air_t` (°C) and `air_h` (% RH) come from the repeater's AHT sensor (v3.1); both are `null` when no sensor is connected. Over ESP-NOW they travel inside the repeater status as `int16 airT` (0.01 °C, 0x7FFF = none) and `uint16 airH` (0.01 % RH, 0xFFFF = none), appended to the V2 status so older repeaters still decode.
+
 Reply: `{"ok":true,"alert":{"id":1790000000,"level":1,"target":"*"}}` — the repeater adopts any newer alert ID and passes it down in its beacons.

@@ -40,6 +40,11 @@
 //      AO  -> 10k resistor -> GPIO4 (S3) / D2 (XIAO C6),  and that pin -> 20k resistor -> GND
 //      (the divider keeps the 0-5 V sensor output safe for the 3.3 V ESP32 pin)
 //    No gas sensor yet? Leave it out - the admin page shows "not connected".
+//    Air temperature + humidity (AHT10 / AHT20 / AHT21 / AHT25 module, I2C address 0x38):
+//      VIN/VCC -> 3V3   GND -> GND
+//      SDA -> D4 (GPIO22) on the XIAO ESP32-C6,  GPIO8 on the ESP32-S3
+//      SCL -> D5 (GPIO23) on the XIAO ESP32-C6,  GPIO9 on the ESP32-S3
+//      (the module already has its pull-up resistors). No AHT? The admin page shows "no sensor".
 //    Do not use GPIO35, 36, 37 on the N16R8 - they belong to the PSRAM.
 //
 //  SETUP FOR EACH BOARD
@@ -48,6 +53,7 @@
 // =====================================================================
 
 #include <WiFi.h>
+#include <Wire.h>
 #include <WebServer.h>
 #include <HTTPClient.h>
 #include <esp_now.h>
@@ -95,6 +101,18 @@ const char* TEST_AP_PASS = "minesafe";  // password of the tunnel repeaters' tes
 #define GAS_LOCAL_RISE_MV  1000         // fail-safe: beeps fast by itself when the reading rises this much
                                         // above its own clean-air level (learned after warm-up)
 #define GAS_EVENT_STEP_MV  300          // tunnel repeaters report at once when gas rises this much
+
+#define AHT_ENABLED      1    // 1 = read an AHT10/AHT20/AHT25 air temperature + humidity sensor, 0 = none
+#if CONFIG_IDF_TARGET_ESP32C6
+  #define AHT_SDA        22   // XIAO ESP32-C6: D4
+  #define AHT_SCL        23   // XIAO ESP32-C6: D5
+#else
+  #define AHT_SDA        8    // ESP32-S3: GPIO8 (same I2C pins as the body unit)
+  #define AHT_SCL        9    // ESP32-S3: GPIO9
+#endif
+#define AHT_ADDR         0x38
+#define AHT_EVERY_MS     2000           // one reading every 2 s
+#define AHT_EVENT_STEP   100            // tunnel repeaters report at once when air temp moves 1.00 C
 
 #define BEACON_MS        1000
 #define STATUS_MS        5000
@@ -153,7 +171,10 @@ struct __attribute__((packed)) MsStatus {
   uint8_t  neighbors;
   uint16_t gasMv;
   uint8_t  gasFlags;      // bit0 warming up, bit1 local alarm, bit2 sensor missing
+  int16_t  airT;          // air temperature from the AHT, 0.01 C (0x7FFF = no sensor)
+  uint16_t airH;          // air humidity from the AHT, 0.01 % RH (0xFFFF = no sensor)
 };
+#define MS_STATUS_V2_LEN (sizeof(MsStatus) - 4)   // V2 repeaters send the status without airT / airH
 struct __attribute__((packed)) MsUpHdr {
   char     magic[2];
   uint8_t  ver, type;
@@ -221,6 +242,8 @@ int      lastHubCode = 0;
 uint16_t statusSeq = 0;
 uint16_t gasMv = 0;
 uint8_t  gasFlags = GAS_ENABLED ? 1 : 4;
+int16_t  airT = 0x7FFF;                 // AHT air temperature, 0.01 C (0x7FFF = no sensor)
+uint16_t airH = 0xFFFF;                 // AHT air humidity, 0.01 % RH (0xFFFF = no sensor)
 bool     statusNow = false;
 Neighbor nbr[16];
 uint32_t seenHash[64];
@@ -292,6 +315,81 @@ void readGas(uint32_t now) {
   if ((f & 2) && !(gasFlags & 2)) Serial.printf("GAS HIGH %u mV - local alarm\n", gasMv);
   gasFlags = f;
 #endif
+}
+
+// ------------------------- AHT air temperature + humidity -------------
+// AHT10 / AHT20 / AHT21 / AHT25 all answer at 0x38 with the same 0xAC measure command.
+// Driver written here (no library): start a measurement, come back 80 ms later, read 6 bytes.
+// Never blocks the radio for more than the I2C transfer itself.
+bool ahtCmd(uint8_t a, uint8_t b, uint8_t c) {
+  Wire.beginTransmission(AHT_ADDR);
+  Wire.write(a); Wire.write(b); Wire.write(c);
+  return Wire.endTransmission() == 0;
+}
+
+int ahtStatus() {                       // -1 = nobody answers at 0x38
+  if (Wire.requestFrom((uint8_t)AHT_ADDR, (uint8_t)1) != 1) return -1;
+  return Wire.read();
+}
+
+bool ahtInit() {
+  Wire.beginTransmission(AHT_ADDR);
+  if (Wire.endTransmission() != 0) return false;            // not connected
+  int s = ahtStatus();
+  if (s < 0) return false;
+  if (!(s & 0x08)) {                                        // not calibrated yet: load the factory calibration
+    if (!ahtCmd(0xBE, 0x08, 0x00)) ahtCmd(0xE1, 0x08, 0x00);   // AHT20/25 use 0xBE, the older AHT10 uses 0xE1
+    delay(10);
+  }
+  return true;
+}
+
+void readAir(uint32_t now) {
+#if AHT_ENABLED
+  static uint8_t  state = 0;            // 0 = not found, 1 = idle, 2 = measuring
+  static uint32_t t0 = 0, lastTry = 0;
+  static uint8_t  fails = 0;
+  static int16_t  lastReported = 0x7FFF;
+  if (state == 0) {
+    if (lastTry && now - lastTry < 10000) return;           // look for the sensor every 10 s
+    lastTry = now | 1;
+    if (ahtInit()) { state = 1; fails = 0; t0 = 0; Serial.println("AHT air sensor found (0x38)"); }
+    return;
+  }
+  if (state == 1) {
+    if (t0 && now - t0 < AHT_EVERY_MS) return;
+    t0 = now;
+    if (ahtCmd(0xAC, 0x33, 0x00)) state = 2;
+    else fails++;
+  } else if (now - t0 >= 80) {                              // measurement takes ~75 ms
+    uint8_t d[6];
+    bool ok = Wire.requestFrom((uint8_t)AHT_ADDR, (uint8_t)6) == 6;
+    for (int i = 0; i < 6; i++) d[i] = ok ? Wire.read() : 0;
+    if (ok && (d[0] & 0x80)) { if (now - t0 < 300) return; ok = false; }   // still busy: wait a little more
+    state = 1;
+    if (ok) {
+      uint32_t rh = ((uint32_t)d[1] << 12) | ((uint32_t)d[2] << 4) | (d[3] >> 4);
+      uint32_t tr = (((uint32_t)d[3] & 0x0F) << 16) | ((uint32_t)d[4] << 8) | d[5];
+      float h = rh * 100.0f / 1048576.0f, t = tr * 200.0f / 1048576.0f - 50.0f;
+      if (h >= 0 && h <= 100 && t > -40 && t < 85 && !(rh == 0 && tr == 0)) {
+        airT = (int16_t)lroundf(t * 100); airH = (uint16_t)lroundf(h * 100); fails = 0;
+        if (lastReported == 0x7FFF || abs(airT - lastReported) >= AHT_EVENT_STEP) { statusNow = true; lastReported = airT; }
+      } else ok = false;
+    }
+    if (!ok) fails++;
+  }
+  if (fails >= 5) {                                         // unplugged: show "no sensor" and look again
+    if (airT != 0x7FFF) Serial.println("AHT air sensor lost - check SDA/SCL/3V3/GND");
+    airT = 0x7FFF; airH = 0xFFFF; state = 0; lastReported = 0x7FFF; statusNow = true;
+  }
+#endif
+}
+
+String airJson(int16_t t, uint16_t h) {                     // ,"air_t":31.25,"air_h":72.40  (null = no sensor)
+  char b[48];
+  if (t == 0x7FFF || h == 0xFFFF) return ",\"air_t\":null,\"air_h\":null";
+  snprintf(b, sizeof(b), ",\"air_t\":%.2f,\"air_h\":%.2f", t / 100.0f, h / 100.0f);
+  return b;
 }
 
 // ------------------------- routing -----------------------------------
@@ -386,7 +484,7 @@ void queueStatusForHub(const MsStatus& st, const uint8_t* path, uint8_t pathLen)
            repName(st.rep).c_str(), st.hop, st.parent ? repName(st.parent).c_str() : "", st.parentRssi,
            (unsigned long)st.alertId, st.buzzing ? "true" : "false", (unsigned long)st.uptime, st.bodies, st.neighbors,
            st.gasMv, st.gasFlags & 1 ? "true" : "false", st.gasFlags & 2 ? "true" : "false", st.gasFlags & 4 ? "true" : "false");
-  String s = String(js) + pathJson(path, pathLen) + "}";
+  String s = String(js) + pathJson(path, pathLen) + airJson(st.airT, st.airH) + "}";
   for (int i = 0; i < nStatuses; i++)                         // keep only the newest per repeater
     if (hubStatuses[i].indexOf("\"id\":\"" + repName(st.rep) + "\"") >= 0) { hubStatuses[i] = s; return; }
   if (nStatuses < 16) hubStatuses[nStatuses++] = s;
@@ -424,8 +522,9 @@ void onUp(const uint8_t* pl, uint8_t n) {
     if (h.kind == UP_TELEM && innerLen >= 30) {
       MsTelem t; copyTelem(t, inner, innerLen);
       queueTelemetryForHub(t, h.bodyRssi, path, len);
-    } else if (h.kind == UP_STATUS && innerLen >= sizeof(MsStatus)) {
-      MsStatus st; memcpy(&st, inner, sizeof(st));
+    } else if (h.kind == UP_STATUS && innerLen >= MS_STATUS_V2_LEN) {
+      MsStatus st; st.airT = 0x7FFF; st.airH = 0xFFFF;       // older repeater without the AHT fields
+      memcpy(&st, inner, innerLen < sizeof(st) ? innerLen : sizeof(st));
       queueStatusForHub(st, path, len);
     }
   } else {
@@ -439,6 +538,7 @@ MsStatus myStatus() {
   st.alertId = alertId; st.buzzing = alertLevel; st.uptime = millis() / 1000;
   st.statusSeq = ++statusSeq; st.bodies = bodiesHeard; st.neighbors = neighborCount(millis());
   st.gasMv = gasMv; st.gasFlags = gasFlags;
+  st.airT = airT; st.airH = airH;
   return st;
 }
 
@@ -606,6 +706,7 @@ const char TEST_HTML[] =
   " <div class=\"row\"><span>Admin link</span><b id=\"hub\">-</b></div>\n"
   " <div class=\"row\"><span>Radio channel</span><b id=\"ch\">-</b></div>\n"
   " <div class=\"row\"><span>Gas sensor</span><b id=\"gas\">-</b></div>\n"
+  " <div class=\"row\"><span>Air (AHT)</span><b id=\"air\">-</b></div>\n"
   "</div>\n"
   "<div class=\"card\">\n"
   " <b>Fake worker (this phone acts as a body unit)</b>\n"
@@ -656,6 +757,7 @@ const char TEST_HTML[] =
   " else $('#hub').innerHTML='<b class=\"warn\">through '+(d.parent||'?')+'</b>';\n"
   " $('#ch').textContent=d.ch;\n"
   " $('#gas').textContent=d.gas_missing?'not connected':(d.gas_mv+' mV'+(d.gas_warm?' (warming up)':''));\n"
+  " $('#air').innerHTML=d.air_t==null?'not connected':d.air_t.toFixed(1)+' &deg;C &middot; '+d.air_h.toFixed(0)+' % RH';\n"
   " if(d.sent!==undefined)$('#sent').textContent=d.sent;\n"
   " $('#led').className='led'+(d.led?' on':'');$('#ledt').textContent=d.led?'ALERT - LED ON':'Alert LED off';\n"
   "}\n"
@@ -672,15 +774,15 @@ bool alertFor(const String& id) {
 }
 
 String statusJson(const String& id) {
-  char js[360];
+  char js[420];
   int32_t hubAge = lastHubOk ? (int32_t)(millis() - lastHubOk) : -1;
   snprintf(js, sizeof(js),
            "{\"rep\":\"%s\",\"gateway\":%s,\"hop\":%u,\"parent\":\"%s\",\"ch\":%u,\"hub_age\":%ld,\"hub_code\":%d,"
-           "\"gas_mv\":%u,\"gas_warm\":%s,\"gas_missing\":%s,\"led\":%s,\"sent\":%lu}",
+           "\"gas_mv\":%u,\"gas_warm\":%s,\"gas_missing\":%s,\"led\":%s,\"sent\":%lu",
            repName(REPEATER_NO).c_str(), IS_GATEWAY ? "true" : "false", myHop, parent ? repName(parent).c_str() : "",
            channel, (long)hubAge, lastHubCode, gasMv, gasFlags & 1 ? "true" : "false", gasFlags & 4 ? "true" : "false",
            alertFor(id) ? "true" : "false", (unsigned long)fakeSent);
-  return js;
+  return String(js) + airJson(airT, airH) + "}";
 }
 
 void handleFake() {
@@ -844,6 +946,13 @@ void setup() {
 #if GAS_ENABLED
   analogSetPinAttenuation(GAS_PIN, ADC_11db);
 #endif
+#if AHT_ENABLED
+  Wire.begin(AHT_SDA, AHT_SCL);
+  Wire.setClock(100000);
+  delay(40);                            // AHT needs ~40 ms after power-on
+  Serial.printf("AHT air sensor on SDA GPIO%d / SCL GPIO%d: %s\n", AHT_SDA, AHT_SCL,
+                ahtInit() ? "found" : "NOT found (check wiring) - will keep looking");
+#endif
   Serial.printf("Buzzer test on GPIO%d (%s%s): 3 beeps\n", BUZZER_PIN, BUZZER_PASSIVE ? "passive, tone" : "active",
                 BUZZER_ACTIVE_LOW ? ", active-LOW" : "");
   for (int i = 0; i < 3; i++) { beep(150); delay(150); }
@@ -882,6 +991,7 @@ void loop() {
 
   handleRadio(now);
   readGas(now);
+  readAir(now);
   channelSearch(now);
   if (now - lastRoute > 1000) { lastRoute = now; recomputeRoute(now); }
 
@@ -914,11 +1024,15 @@ void loop() {
   web.handleClient();
 #endif
 
-  // Serial Monitor: type  b  + Enter = 1 second buzzer test (checks wiring without the admin)
+  // Serial Monitor: type  b  + Enter = 1 second buzzer test,  a  + Enter = AHT air reading (checks wiring without the admin)
   static uint32_t testUntil = 0;
   while (Serial.available()) {
     char c = Serial.read();
     if (c == 'b' || c == 'B') { testUntil = now + 1000; Serial.println("Buzzer test 1 s"); }
+    if (c == 'a' || c == 'A') {
+      if (airT == 0x7FFF) Serial.println("AHT: no reading (sensor not found)");
+      else Serial.printf("AHT: air %.2f C, humidity %.2f %%RH\n", airT / 100.0f, airH / 100.0f);
+    }
   }
   // buzzer: 300 ms on / 200 ms off while the alert is active
   bool buzz = (alertLevel && (now % 500) < 300) || ((gasFlags & 2) && (now % 200) < 100) || now < testUntil;

@@ -5,7 +5,7 @@
 **Intelligent Safety Gear Compliance, Health Monitoring and Navigation System for Miners**<br>
 Capstone project · B.E. Mechanical and Mechatronics Engineering · Thakur College of Engineering and Technology (TCET), Mumbai · 2026–27
 
-[![Progress](https://img.shields.io/badge/progress-71%25-F2A900?style=flat-square)](ROADMAP.md) [![Week](https://img.shields.io/badge/now-week_9_of_14-1f6feb?style=flat-square)](ROADMAP.md) [![Version](https://img.shields.io/badge/version-V3_(v3.0)-2ea44f?style=flat-square)](CHANGELOG.md) ![ESP32](https://img.shields.io/badge/ESP32-ESP--NOW-E7352C?style=flat-square&logo=espressif&logoColor=white) ![Python](https://img.shields.io/badge/hub-Flask-3776AB?style=flat-square&logo=python&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)](LICENSE)
+[![Progress](https://img.shields.io/badge/progress-71%25-F2A900?style=flat-square)](ROADMAP.md) [![Week](https://img.shields.io/badge/now-week_9_of_14-1f6feb?style=flat-square)](ROADMAP.md) [![Version](https://img.shields.io/badge/version-V3_(v3.1)-2ea44f?style=flat-square)](CHANGELOG.md) ![ESP32](https://img.shields.io/badge/ESP32-ESP--NOW-E7352C?style=flat-square&logo=espressif&logoColor=white) ![Python](https://img.shields.io/badge/hub-Flask-3776AB?style=flat-square&logo=python&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)](LICENSE)
 
 </div>
 
@@ -72,6 +72,7 @@ Raw double integration of acceleration drifts by ~175 m in a minute, so MineSafe
 | v0.6 | Tunnel map + GPS-free tracking, gas analysis, real body sensors | ✅ software · 🔧 sensor bench test next |
 | v1.0 | Structured repo, docs, presentation, Notion | ✅ |
 | **V3 · v3.0** | Camera entry station (XIAO S3 Sense), mock worker, schematics, admin theme, research docs — [docs/v3.md](docs/v3.md) | ✅ software · 🔧 hardware test next |
+| v3.1 | AHT air temperature + humidity on every repeater, shown in the admin with wet-bulb heat warnings | ✅ software · 🔧 hardware test next |
 | v4.x | Zigbee (802.15.4) network on ESP32-C6 nodes | 📋 planned |
 
 Every version has its own branch (`version/v0.0` … `version/v1.0`) — see [CHANGELOG.md](CHANGELOG.md) for what changed and [docs/decisions.md](docs/decisions.md) for why.

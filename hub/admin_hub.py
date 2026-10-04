@@ -70,6 +70,12 @@ LIMITS = {
     "repeater_offline_s": 10,       # main repeater (posts every second)
     "mesh_repeater_offline_s": 20,  # tunnel repeaters (report every 5 s through the chain)
     "gas_alarm_mv": 4000,           # raw sensor output (mV) that always raises the alert - set it on the Gas & air tab
+    # air at each repeater (AHT sensor). Heat stress is judged on the wet-bulb temperature,
+    # worked out from air temperature + humidity: Indian mine rules (CMR / MMR) ask for more
+    # ventilation above 30.5 C wet-bulb and no normal work above 33.5 C wet-bulb.
+    "wb_warn": 30.5, "wb_danger": 33.5,
+    "air_temp_warn": 35.0, "air_temp_danger": 40.0,   # dry air temperature, C
+    "air_hum_warn": 90.0,                              # % RH: condensation, fogging, sensor + electronics risk
 }
 
 # ---- flag bits sent by the body node (must match body_node.ino) ------
@@ -349,6 +355,7 @@ def clock(t=None):
 workers = load("workers.json", {})     # body_id -> worker record
 LIMITS.update({k: v for k, v in load("settings.json", {}).items() if k in LIMITS})
 gas_state = {}                         # repeater -> {"high": bool, "last_alert": t}
+air_state = {}                         # repeater -> last air level (0 safe, 1 warning, 2 danger)
 registry = load("tags.json", {})       # tag uid -> gear
 events = []                            # gear scan/write log
 pending_scans = []                     # scans waiting for a photo
@@ -673,6 +680,19 @@ def telemetry():
                 g.append([round(now, 1), x["gas_mv"]])
                 del g[:-600]
                 gas_sample(sid, x, now)
+            if "air_t" in st:                       # AHT sensor (V3.1 repeaters); null = not connected
+                at, ah = st.get("air_t"), st.get("air_h")
+                ok = isinstance(at, (int, float)) and isinstance(ah, (int, float)) and -40 < at < 85 and 0 <= ah <= 100
+                x.update(air_t=round(float(at), 2) if ok else None, air_h=round(float(ah), 2) if ok else None,
+                         air_missing=not ok)
+                if ok:
+                    x["air_wb"] = round(wet_bulb(x["air_t"], x["air_h"]), 1)
+                    a = x.setdefault("air_hist", [])
+                    if not a or now - a[-1][0] >= 4:        # one point every ~5 s is plenty for slow air changes
+                        a.append([round(now, 1), x["air_t"], x["air_h"]])
+                        del a[:-720]
+                else:
+                    x.pop("air_wb", None)
             if sid != rep:
                 x.update(parent=str(st.get("parent", "")).upper(), via_mesh=True)
         for p in pk:
@@ -845,6 +865,7 @@ def watchdog():
                 last_status[bid] = st
                 candidate.pop(bid, None)
             check_gas(now)
+            check_air(now)
         time.sleep(1)
 
 
@@ -1257,6 +1278,52 @@ def gas_rs(mv):
     return GAS_CFG["rl_k"] * (GAS_CFG["vc"] - v) / v
 
 
+def wet_bulb(t, rh):
+    """Wet-bulb temperature (C) from air temperature (C) and humidity (%RH) - Stull 2011 formula,
+    good to about +-0.3 C for 5-99 %RH and -20..50 C."""
+    rh = min(max(rh, 5.0), 99.0)
+    return (t * math.atan(0.151977 * (rh + 8.313659) ** 0.5) + math.atan(t + rh) - math.atan(rh - 1.676331)
+            + 0.00391838 * rh ** 1.5 * math.atan(0.023101 * rh) - 4.686035)
+
+
+def air_level(r):
+    """(level 0/1/2, reasons) for one repeater's AHT reading."""
+    t, h = r.get("air_t"), r.get("air_h")
+    if t is None or h is None:
+        return None, []
+    wb = wet_bulb(t, h)
+    lv, why = 0, []
+    if wb >= LIMITS["wb_danger"]:
+        lv = 2; why.append(f"wet-bulb {wb:.1f} °C (limit {LIMITS['wb_danger']})")
+    elif wb >= LIMITS["wb_warn"]:
+        lv = 1; why.append(f"wet-bulb {wb:.1f} °C - more ventilation needed")
+    if t >= LIMITS["air_temp_danger"]:
+        lv = 2; why.append(f"air {t:.1f} °C")
+    elif t >= LIMITS["air_temp_warn"]:
+        lv = max(lv, 1); why.append(f"air {t:.1f} °C")
+    if h >= LIMITS["air_hum_warn"]:
+        lv = max(lv, 1); why.append(f"humidity {h:.0f} %")
+    return lv, why
+
+
+def check_air(now):
+    """Log heat / humidity changes at each repeater in the incident log (no automatic alarm:
+    heat builds up slowly, the control room decides)."""
+    for rid, r in repeaters.items():
+        online = now - r["last_seen"] < LIMITS["mesh_repeater_offline_s"]
+        lv, why = air_level(r)
+        if lv is None or not online:
+            continue
+        prev = air_state.get(rid, 0)
+        if lv != prev:
+            name = ["SAFE", "WARNING", "DANGER"]
+            incidents.insert(0, {"t": now, "time": clock(now), "body_id": rid, "name": f"Air at {rid}",
+                                 "from": name[prev], "to": name[lv],
+                                 "why": (", ".join(why) or "back to normal")
+                                 + f" ({r['air_t']:.1f} °C, {r['air_h']:.0f} % RH)"})
+            air_state[rid] = lv
+
+
 def gas_sample(rid, r, now):
     """Called for every gas reading. Auto-calibrates R0 from the first minute of clean
     readings after warm-up (until the admin calibrates by hand)."""
@@ -1379,8 +1446,11 @@ def state():
         for r in repeaters.values():
             age = now - r["last_seen"]
             limit = LIMITS["mesh_repeater_offline_s"] if r.get("via_mesh") else LIMITS["repeater_offline_s"]
-            reps.append({**{k: v for k, v in r.items() if k not in ("gas_hist", "rs_hist")}, "age": round(age, 1),
+            lv, why = air_level(r)
+            reps.append({**{k: v for k, v in r.items() if k not in ("gas_hist", "rs_hist", "air_hist")}, "age": round(age, 1),
                          "online": age < limit, "gas_spark": [g[1] for g in r.get("gas_hist", [])[-40:]],
+                         "air_level": lv, "air_why": why,
+                         "air_spark": [[a[1], a[2]] for a in r.get("air_hist", [])[-60:]],
                          "gas": gas_analysis(r["id"], r) if "gas_mv" in r else None})
         reps.sort(key=lambda r: r["id"])
         online = [r for r in reps if r["online"]]
@@ -1699,6 +1769,14 @@ tr.bad td{background:#ff4d4f14}
 .graw{display:flex;justify-content:space-between;font-size:13px;color:var(--muted)}
 .graw b{color:var(--ink);font-family:var(--mono)}
 .gcard svg{width:100%;height:46px;display:block;background:var(--panel2);border-radius:6px}
+.air{border-top:1px dashed var(--line);padding-top:10px;display:grid;gap:8px}
+.air .ah{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.anum{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.anum div{background:var(--panel2);border-radius:8px;padding:8px 10px;border-left:3px solid var(--safe)}
+.air.WARNING .anum div{border-left-color:var(--warn)}.air.DANGER .anum div{border-left-color:var(--danger)}
+.anum small{display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.anum b{font-family:var(--mono);font-size:20px}.anum b i{font-style:normal;font-size:12px;color:var(--muted);margin-left:2px}
+.akey{display:flex;gap:12px;font-size:12px;color:var(--muted)}.akey i{display:inline-block;width:10px;height:3px;border-radius:2px;vertical-align:middle;margin-right:4px}
 /* splash */
 #splash{position:fixed;inset:0;z-index:100;background:#12171A;display:flex;flex-direction:column;justify-content:center;padding:0 calc(9vw + 24px) 0 9vw;gap:3vh;overflow:hidden;transition:opacity .45s,visibility .45s}
 #splash::after{content:"";position:absolute;top:0;right:0;width:clamp(18px,2.2vw,40px);height:100%;background:var(--stripe)}
@@ -1883,7 +1961,7 @@ tr.bad td{background:#ff4d4f14}
     <p class="note">Body units send to the nearest repeater; each repeater passes data to the one closer to the main repeater, which sends it to this laptop.</p>
     <div class="chain" id="chain"></div>
     <h2 style="margin-top:14px">Repeaters</h2>
-    <div class="tbl"><table><thead><tr><th>Repeater</th><th>Status</th><th>Hops to main</th><th>Sends to</th><th>Link signal</th><th>Last report</th><th>Body packets</th><th>Gas</th><th>Buzzer</th></tr></thead><tbody id="rtable"></tbody></table></div>
+    <div class="tbl"><table><thead><tr><th>Repeater</th><th>Status</th><th>Hops to main</th><th>Sends to</th><th>Link signal</th><th>Last report</th><th>Body packets</th><th>Gas</th><th>Air (AHT)</th><th>Buzzer</th></tr></thead><tbody id="rtable"></tbody></table></div>
     <h2 style="margin-top:22px">Body units on air</h2>
     <div class="tbl"><table><thead><tr><th>Body ESP</th><th>Worker</th><th>Last packet</th><th>Serial no.</th><th>Packet loss</th><th>Nearest repeater</th><th>Route to admin</th></tr></thead><tbody id="btable"></tbody></table></div>
   </section>
@@ -1959,7 +2037,11 @@ function render(){
     + (() => { const g = S.repeaters.filter(r => r.online && r.gas_mv != null && !r.gas_missing); if (!g.length) return "";
         const lvl = r => r.gas_local || r.gas_mv >= S.limits.gas_alarm_mv || (r.gas && r.gas.gases.some(q => q.main && q.level === 2)) ? 2 : r.gas && r.gas.gases.some(q => q.main && q.level === 1) ? 1 : 0;
         const top = g.reduce((a, b) => lvl(b) > lvl(a) || (lvl(b) === lvl(a) && b.gas_mv > a.gas_mv) ? b : a), high = lvl(top) === 2;
-        return `<span class="chip" onclick="showTab('gas')" style="${high ? "background:var(--danger);border-color:var(--danger);color:#fff" : ""}"><span class="d" style="background:${high ? "#fff" : "var(--safe)"}"></span>Gas <b>${top.gas_mv} mV</b> ${esc(top.id)}</span>`; })();
+        return `<span class="chip" onclick="showTab('gas')" style="${high ? "background:var(--danger);border-color:var(--danger);color:#fff" : ""}"><span class="d" style="background:${high ? "#fff" : "var(--safe)"}"></span>Gas <b>${top.gas_mv} mV</b> ${esc(top.id)}</span>`; })()
+    + (() => { const g = S.repeaters.filter(r => r.online && r.air_t != null); if (!g.length) return "";
+        const top = g.reduce((a, b) => (b.air_level || 0) > (a.air_level || 0) || ((b.air_level || 0) === (a.air_level || 0) && b.air_wb > a.air_wb) ? b : a);
+        const c = ["var(--safe)", "var(--warn)", "var(--danger)"][top.air_level || 0];
+        return `<span class="chip" onclick="showTab('gas')" title="Hottest repeater (wet-bulb ${top.air_wb} °C)"><span class="d" style="background:${c}"></span>Air <b>${top.air_t.toFixed(1)} °C · ${top.air_h.toFixed(0)} %</b> ${esc(top.id)}</span>`; })();
   $("#live-dot").style.background = sm.DANGER ? "var(--danger)" : sm.WARNING ? "var(--warn)" : "var(--safe)";
 
   // alert banner
@@ -2006,8 +2088,9 @@ function render(){
      <td>${r.gateway ? (r.rssi != null ? sig(r.rssi) + " " + r.rssi + " dBm WiFi" : "–") : (r.prssi != null ? sig(r.prssi) + " " + r.prssi + " dBm" : "–")}</td>
      <td>${ago(r.age)}</td><td class="mono">${r.bodies ?? r.packets ?? 0}</td>
      <td class="mono">${r.gas_mv == null ? "–" : r.gas_missing ? "no sensor" : r.gas_mv + " mV" + (r.gas_warm ? " (warming)" : "")}</td>
+     <td class="mono">${!("air_t" in r) ? "–" : r.air_t == null ? "no sensor" : `<span style="color:${["var(--ink)","var(--warn)","var(--danger)"][r.air_level || 0]}">${r.air_t.toFixed(1)} °C · ${r.air_h.toFixed(0)} %</span>`}</td>
      <td>${r.buzzing ? '<span class="tag red">BUZZING</span>' : "quiet"}</td></tr>`).join("")
-     || `<tr><td colspan="9" class="note">No repeater has connected yet. Power the main repeater on, or run <span class="mono">python sim_repeater.py</span>.</td></tr>`;
+     || `<tr><td colspan="10" class="note">No repeater has connected yet. Power the main repeater on, or run <span class="mono">python sim_repeater.py</span>.</td></tr>`;
   const all = [...S.workers.map(w=>({id:w.body_id,name:w.name,live:w.live,status:w.status})), ...S.unknown.map(u=>({id:u.body_id,name:"(unregistered)",live:u.live,status:u.status}))].filter(x=>x.live);
   $("#btable").innerHTML = all.map(x => `<tr><td class="mono">${esc(x.id)}</td><td>${esc(x.name)}</td><td>${ago(x.live.age)}</td>
      <td class="mono">#${x.live.seq}</td><td class="mono">${x.live.loss}%</td><td>${esc(x.live.near)} ${sig(x.live.near_rssi)}</td>
@@ -2063,6 +2146,8 @@ function renderChain(all){
         ${r.buzzing ? '<span class="tag red">BUZZING</span>' : r.online ? '<span class="pill SAFE">ON</span>' : '<span class="pill DANGER">OFF</span>'}</div>
         <div class="m">${r.gateway ? "WiFi to admin" + (r.ip ? " · IP " + esc(r.ip) : "") : "sends to " + esc(r.parent || "?")} ${r.gateway ? "" : sig(r.prssi ?? -127)} · ${ago(r.age)}</div>
         ${gasHtml(r)}
+        ${!("air_t" in r) ? "" : r.air_t == null ? '<div class="m" style="color:var(--warn)">Air sensor not connected</div>'
+          : `<div class="m">Air <b class="mono" style="color:${["var(--ink)","var(--warn)","var(--danger)"][r.air_level || 0]}">${r.air_t.toFixed(1)} °C · ${r.air_h.toFixed(0)} % RH</b></div>`}
         ${(near[r.id] || []).map(x => `<div class="wchip ${esc(x.status)}" onclick="openWorker('${esc(x.id)}')">👷 ${esc(x.name)} <span class="note">${sig(x.live.near_rssi)}</span></div>`).join("") || '<div class="m">No workers nearby</div>'}
       </div>`).join("") + `</div>`;
   });
@@ -2574,7 +2659,32 @@ $("#g-save").onclick = async () => {
 async function calibrate(id){ const r = await api("/api/gas/calibrate", {repeater: id});
   toast(r.ok ? `<b>${esc(id)}</b> calibrated: this air now counts as clean.` : esc(r.error), r.ok ? "SAFE" : "WARNING"); poll(); }
 const ppmTxt = v => v >= 10000 ? (v / 10000).toFixed(2) + " %" : v >= 100 ? Math.round(v) + " ppm" : v.toFixed(1) + " ppm";
+function airBlock(r){
+  if (!("air_t" in r)) return "";                       // repeater firmware without the AHT code
+  if (r.air_t == null) return `<div class="air"><div class="ah"><b>Air · AHT sensor</b><span class="pill NO">NO SENSOR</span></div>
+    <div class="note">Connect the AHT: VCC → 3V3, GND → GND, SDA → D4, SCL → D5.</div></div>`;
+  const lv = r.air_level || 0, st = ["SAFE", "WARNING", "DANGER"][lv], d = r.air_spark || [];
+  let svg = "";
+  if (d.length > 1){
+    const ts = d.map(p => p[0]), lo = Math.floor(Math.min(...ts) - 1), hi = Math.ceil(Math.max(...ts) + 1);
+    const x = i => (i / (d.length - 1) * 100).toFixed(1);
+    const pt = d.map((p, i) => `${x(i)},${(44 - (p[0] - lo) / (hi - lo) * 40).toFixed(1)}`).join(" ");
+    const ph = d.map((p, i) => `${x(i)},${(44 - p[1] / 100 * 40).toFixed(1)}`).join(" ");
+    svg = `<svg viewBox="0 0 100 46" preserveAspectRatio="none" aria-label="Air temperature and humidity, last 5 minutes">
+      <polyline points="${ph}" fill="none" stroke="#4c9bf0" stroke-width="1.6" vector-effect="non-scaling-stroke"/>
+      <polyline points="${pt}" fill="none" stroke="#f0b429" stroke-width="1.8" vector-effect="non-scaling-stroke"/></svg>
+      <div class="akey"><span><i style="background:#f0b429"></i>temperature ${lo}–${hi} °C</span><span><i style="background:#4c9bf0"></i>humidity 0–100 %</span></div>`;
+  }
+  return `<div class="air ${st}"><div class="ah"><b>Air · AHT sensor</b><span class="pill ${st}">${st === "SAFE" ? "OK" : st}</span></div>
+    <div class="anum"><div><small>Temperature</small><b>${r.air_t.toFixed(1)}<i>°C</i></b></div>
+      <div><small>Humidity</small><b>${r.air_h.toFixed(0)}<i>% RH</i></b></div>
+      <div title="Heat stress: warning ${S.limits.wb_warn} °C, danger ${S.limits.wb_danger} °C"><small>Wet-bulb</small><b>${r.air_wb != null ? r.air_wb.toFixed(1) : "–"}<i>°C</i></b></div></div>
+    ${(r.air_why || []).length ? `<div class="note" style="color:${lv === 2 ? "#ff8a8c" : "var(--warn)"}">${esc(r.air_why.join(" · "))}</div>` : ""}
+    ${svg}</div>`;
+}
 function gasCard(r){
+  if (r.gas_mv == null) return `<div class="gcard ${["SAFE","WARNING","DANGER"][r.air_level || 0]}"><div class="head"><b class="mono" style="font-size:17px">${esc(r.id)}</b>
+      <span class="pill NO">NO GAS SENSOR</span></div>${r.online ? "" : '<div class="note"><b style="color:#ff8a8c">repeater offline</b></div>'}${airBlock(r)}</div>`;
   const g = r.gas, lv = g ? Math.max(0, ...g.gases.filter(q => q.main).map(q => q.level)) : 0;
   const high = lv === 2 || r.gas_local || r.gas_mv >= S.limits.gas_alarm_mv;
   const st = r.gas_missing ? "OFF" : high ? "DANGER" : lv === 1 ? "WARNING" : "SAFE";
@@ -2587,7 +2697,8 @@ function gasCard(r){
     : g.gases.map(q => `<div class="grow" style="${q.main ? "" : "opacity:.6"}"><span>${esc(q.name)}${q.name !== q.key ? ` <span class="note">${esc(q.key)}</span>` : ""}</span><span class="v ${q.level ? "l" + q.level : ""}">${ppmTxt(q.ppm)}</span>
         <div class="gbar"><i class="${q.level ? "l" + q.level : ""}" style="width:${Math.min(100, Math.max(1.5, q.ppm / q.danger * 100)).toFixed(1)}%"></i></div>
         <small>${q.main ? `warning ${ppmTxt(q.warn)} · danger ${ppmTxt(q.danger)}` : "side reading (sensor not made for this gas) · info only, no alarm"}</small></div>`).join("");
-  return `<div class="gcard ${st}"><div class="head"><b class="mono" style="font-size:17px">${esc(r.id)}</b>
+  const cardSt = ["SAFE", "WARNING", "DANGER"].indexOf(st) < (r.air_level || 0) ? ["SAFE", "WARNING", "DANGER"][r.air_level] : st;
+  return `<div class="gcard ${cardSt}"><div class="head"><b class="mono" style="font-size:17px">${esc(r.id)}</b>
       <span class="pill ${st === "OFF" ? "NO" : st}">${label}</span></div>
     <div class="note">${esc(g ? g.model + " · " + g.note : "")}${r.online ? "" : ' · <b style="color:#ff8a8c">repeater offline</b>'}</div>
     ${body}
@@ -2596,11 +2707,12 @@ function gasCard(r){
       <polyline points="${pts}" fill="none" stroke="${high ? "#ff4d4f" : "#4c9bf0"}" stroke-width="1.8" vector-effect="non-scaling-stroke"/></svg>` : ""}
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span class="note">${g && g.cal ? `R0 ${g.cal.how === "auto" ? "auto-learned" : "calibrated"} at ${esc(g.cal.time)}` : ""}</span>
       ${r.gas_warm ? "" : `<button class="btn small" onclick="calibrate('${esc(r.id)}')">Calibrate in clean air</button>`}</div>`}
+    ${airBlock(r)}
   </div>`;
 }
 function renderGas(){
-  const reps = S.repeaters.filter(r => r.gas_mv != null);
-  const anyHigh = reps.some(r => !r.gas_missing && ((r.gas && r.gas.gases.some(q => q.main && q.level === 2)) || r.gas_local || r.gas_mv >= S.limits.gas_alarm_mv));
+  const reps = S.repeaters.filter(r => r.gas_mv != null || "air_t" in r);
+  const anyHigh = reps.some(r => r.air_level === 2) || reps.some(r => r.gas_mv != null && !r.gas_missing && ((r.gas && r.gas.gases.some(q => q.main && q.level === 2)) || r.gas_local || r.gas_mv >= S.limits.gas_alarm_mv));
   $("#n-gas").hidden = !anyHigh;
   if (!$("#v-gas").classList.contains("on")) return;
   setIfChanged("#g-model", JSON.stringify(S.gas_models), () => S.gas_models.map(m => `<option>${esc(m)}</option>`).join(""));
@@ -2609,7 +2721,7 @@ function renderGas(){
   $("#g-note").innerHTML = `The model is printed on the side of the sensor (MQ-2, MQ-4 …). Most MQ boards use RL = 1 kΩ (resistor marked <b>102</b>) and run on 5 V.
     Backup alarm: any repeater whose raw sensor output reaches this level alerts everyone, even before calibration.`;
   $("#gascards").innerHTML = reps.length ? reps.map(gasCard).join("")
-    : `<div class="empty">No gas readings yet. Repeater firmware with <span class="mono">GAS_ENABLED 1</span> reports its MQ sensor here.</div>`;
+    : `<div class="empty">No gas or air readings yet. Repeater firmware with <span class="mono">GAS_ENABLED 1</span> reports its MQ sensor here, and <span class="mono">AHT_ENABLED 1</span> its air temperature + humidity.</div>`;
 }
 
 /* ---------- alerts ---------- */

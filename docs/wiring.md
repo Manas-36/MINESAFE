@@ -31,9 +31,15 @@ The green MAX3010x board pulls its I2C lines to 1.8 V; sharing the bus with the 
 |---|---|---|
 | Buzzer + (− → GND) | GPIO5 | D10 (GPIO18) |
 | MQ gas AO → 10 kΩ → pin, pin → 20 kΩ → GND (module VCC → 5 V) | GPIO4 | D2 |
+| **AHT10/20/25 VCC** | 3V3 | 3V3 |
+| **AHT GND** | GND | GND |
+| **AHT SDA** | GPIO8 | D4 (GPIO22) |
+| **AHT SCL** | GPIO9 | D5 (GPIO23) |
 | External 2.4 GHz antenna (u.FL → SMA pigtail) | — | u.FL, `USE_EXTERNAL_ANTENNA 1` |
 
 The 10 k / 20 k divider keeps the 0–5 V MQ output safe for the 3.3 V pin; the code multiplies by 1.5 to undo it.
+
+**AHT air sensor (v3.1).** Any AHT10 / AHT20 / AHT21 / AHT25 module at I²C address 0x38; the module's own pull-ups are enough, power it from **3V3 only**. `AHT_ENABLED 1` in `repeater_node.ino` reads it every 2 s (driver written in the sketch, no library). The hub shows air temperature, humidity and the worked-out **wet-bulb** temperature on the *Gas & air* and *Network* tabs: warning at 30.5 °C wet-bulb, danger at 33.5 °C, also warning above 35 °C air or 90 % RH. Mount the sensor away from the MQ heater and the board's regulator, which warm the air around them.
 
 ## Mock body unit (ESP32-C6 + MPU6050)
 An extra worker for the map demo. Flash `body_node` with `BODY_ID "BODY-02"` and `MOCK_MPU_ONLY 1`; only the MPU6050 is wired (same pins as the body unit's C6 column: SDA GPIO22 / D4, SCL GPIO23 / D5, VCC 3V3, GND). Button (GPIO19) and LED (GPIO18) are optional. The hub shows it as a motion-only worker — no temperature or heart-rate warnings.

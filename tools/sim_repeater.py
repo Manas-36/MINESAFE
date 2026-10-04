@@ -82,7 +82,10 @@ def statuses(t):
         aid, lvl = rep_alert[rep]
         out.append({"id": rep, "hop": hop, "parent": parent, "prssi": random.randint(-80, -60),
                     "alert_id": aid, "buzzing": bool(lvl), "up": int(t), "bodies": int(t) * 2,
-                    "nbrs": 2 if rep == "REP-02" else 1, "path": path_from(rep)})
+                    "nbrs": 2 if rep == "REP-02" else 1, "path": path_from(rep),
+                    # AHT air sensor: warmer and more humid deeper in the mine
+                    "air_t": round(26 + 2.5 * hop + 0.6 * math.sin(t / 90 + hop), 2),
+                    "air_h": round(min(99, 58 + 14 * hop + 3 * math.sin(t / 120 + hop)), 2)})
     return out
 
 

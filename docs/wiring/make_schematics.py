@@ -250,14 +250,15 @@ def body():
 
 # ================================================================= repeater
 def repeater():
-    s = Sheet(1400, 800, "Repeater node — wiring schematic",
-              "Main repeater (IS_GATEWAY 1, joins Wi-Fi) and tunnel repeaters (IS_GATEWAY 0) use the same circuit")
-    P = mcu(s, 170, 140, 260, 470, "ESP32-S3 DevKit", "or Seeed XIAO ESP32-C6",
-            left=[(110, "5V (USB)"), (180, "3V3"), (420, "GND")],
-            right=[(140, "GPIO5 / D10"), (300, "GPIO4 / D2  ADC")])
+    s = Sheet(1400, 1040, "Repeater node — wiring schematic",
+              "Main repeater (IS_GATEWAY 1, joins Wi-Fi) and tunnel repeaters (IS_GATEWAY 0) use the same circuit · buzzer + MQ gas + AHT air sensor")
+    P = mcu(s, 170, 140, 260, 660, "ESP32-S3 DevKit", "or Seeed XIAO ESP32-C6",
+            left=[(110, "5V (USB)"), (200, "3V3"), (420, "GND")],
+            right=[(140, "GPIO5 / D10"), (300, "GPIO4 / D2  ADC"), (570, "GPIO8 / D4  SDA"), (610, "GPIO9 / D5  SCL")])
     x5, y5 = P["5V (USB)"]; s.wire([(x5, y5), (x5 - 30, y5), (x5 - 30, y5 - 30)], "5V"); s.vcc(x5 - 30, y5 - 30, "5V")
-    s.text(x5 - 34, y5 + 22, "USB 5 V adapter", 11, MUTED, "end")
-    x3, y3 = P["3V3"]; s.wire([(x3, y3), (x3 - 22, y3)], "3V3"); s.text(x3 - 26, y3 + 4, "nc", 11, MUTED, "end")
+    s.text(x5 - 44, y5 - 26, "USB 5 V adapter", 11, MUTED, "end")
+    x3, y3 = P["3V3"]; s.wire([(x3, y3), (x3 - 30, y3), (x3 - 30, y3 - 24)], "3V3"); s.vcc(x3 - 30, y3 - 24)
+    s.text(x3 - 34, y3 + 18, "to AHT VCC", 11, MUTED, "end")
     xg, yg = P["GND"]; s.wire([(xg, yg), (xg - 30, yg), (xg - 30, yg + 20)], "GND"); s.gnd(xg - 30, yg + 20)
 
     # buzzer
@@ -289,10 +290,24 @@ def repeater():
     s.text(node_x - 14, my - 10, "0–3.3 V", 11.5, MUTED, "end", 700)
     s.text(930, my - 10, "0–5 V", 11.5, MUTED, "middle", 700)
     s.text(mx + 140, my + 130, "pin order differs between modules — match the labels", 11, MUTED, "middle", italic=True)
+    # AHT10 / AHT20 / AHT25 air temperature + humidity (I2C 0x38)
+    sda_y, scl_y = P["GPIO8 / D4  SDA"][1], P["GPIO9 / D5  SCL"][1]
+    ax, ay, aw, ah = 760, sda_y - 60, 270, 160
+    s.box(ax, ay, aw, ah, "AHT20 / AHT10 / AHT25", "air temp + humidity · I²C 0x38")
+    s.pin(ax, sda_y - 30, "VCC", "l"); s.pin(ax, sda_y, "SDA", "l"); s.pin(ax, scl_y, "SCL", "l"); s.pin(ax, scl_y + 30, "GND", "l")
+    s.wire([P["GPIO8 / D4  SDA"], (ax, sda_y)], "SDA", 3)
+    s.wire([P["GPIO9 / D5  SCL"], (ax, scl_y)], "SCL", 3)
+    s.wire([(ax, sda_y - 30), (700, sda_y - 30), (700, sda_y - 60)], "3V3"); s.vcc(700, sda_y - 60)
+    s.wire([(ax, scl_y + 30), (720, scl_y + 30), (720, scl_y + 60)], "GND"); s.gnd(720, scl_y + 60)
+    s.text(ax + aw + 20, sda_y - 18, "Module has its own pull-ups (no resistors needed)", 11.5, MUTED)
+    s.text(ax + aw + 20, sda_y, "AHT_ENABLED 1 · reads every 2 s", 11.5, MUTED)
+    s.text(ax + aw + 20, sda_y + 18, "XIAO C6: D4 = GPIO22, D5 = GPIO23", 11.5, MUTED)
+    s.text(ax + aw + 20, sda_y + 36, "Keep it out of the buzzer / MQ heater air flow", 11.5, MUTED)
     s.antenna(210, 140, "u.FL (XIAO C6)")
-    s.note(170, 650, ["Divider: V_pin = V_AO × 20k / (10k + 20k) = 0.667 × V_AO",
-                     "Firmware multiplies by 1.5 to recover the sensor voltage; MQ heater needs 5 V, ~150 mA, 60 s warm-up."], 860)
-    s.legend(170, 760, [("5V", "5 V"), ("GND", "Ground"), ("ANA", "Analog (MQ AO)"), ("SIG", "Digital out")])
+    s.note(170, 860, ["Divider: V_pin = V_AO × 20k / (10k + 20k) = 0.667 × V_AO",
+                     "Firmware multiplies by 1.5 to recover the sensor voltage; MQ heater needs 5 V, ~150 mA, 60 s warm-up.",
+                     "AHT on 3.3 V only. Hub works out wet-bulb temperature: warning 30.5 °C, danger 33.5 °C."], 860)
+    s.legend(170, 1000, [("3V3", "3.3 V"), ("5V", "5 V"), ("GND", "Ground"), ("ANA", "Analog (MQ AO)"), ("SIG", "Digital out"), ("SDA", "I²C SDA"), ("SCL", "I²C SCL")])
     s.save("repeater_node.svg")
 
 
