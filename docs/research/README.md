@@ -3,7 +3,7 @@
 Summary of the research phase that came before the build. The full literature review, competitive analysis and architecture documents were prepared as separate reports; add them to this folder as PDF/DOCX.
 
 ## Project
-**Intelligent Safety Gear Compliance, Health Monitoring and Navigation System for Miners** — capstone project, B.E. Mechatronics, TCET Mumbai.
+**Intelligent Safety Gear Compliance, Health Monitoring and Navigation System for Miners** — capstone project, B.E. Mechanical and Mechatronics Engineering, TCET Mumbai.
 
 ## Concept selection
 Problem-statement trends (SIH), Aavishkar judging themes and past winning projects were reviewed, and five blueprints were compared (agriculture robotics, disaster management, assistive healthcare, smart manufacturing, counter-drone defence) before choosing mine safety.

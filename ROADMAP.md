@@ -4,13 +4,13 @@
 
 **Week-by-week progress of the capstone — from research to final review**
 
-![Progress](https://img.shields.io/badge/progress-66%25-F2A900?style=for-the-badge)
-![Done](https://img.shields.io/badge/done-35-2ea44f?style=for-the-badge)
+![Progress](https://img.shields.io/badge/progress-67%25-F2A900?style=for-the-badge)
+![Done](https://img.shields.io/badge/done-36-2ea44f?style=for-the-badge)
 ![In progress](https://img.shields.io/badge/in_progress-2-fb8c00?style=for-the-badge)
 ![To do](https://img.shields.io/badge/to_do-16-6e7781?style=for-the-badge)
 ![Week](https://img.shields.io/badge/now-week_9_of_14-1f6feb?style=for-the-badge)
 
-`████████████████████░░░░░░░░░░`  **35 / 53 tasks**
+`████████████████████░░░░░░░░░░`  **36 / 54 tasks**
 
 </div>
 
@@ -30,7 +30,7 @@
 | ✅ | 06 | 7 Sep – 13 Sep | 📡 Zigbee → ESP-NOW, repeater chain, AI, gas | `v0.4` | `██████████` 4/4 |
 | ✅ | 07 | 14 Sep – 20 Sep | 🔗 Multi-hop chain + alert propagation | `v0.4` | `██████████` 3/3 |
 | ✅ | 08 | 21 Sep – 27 Sep | 🎯 First end-to-end run | `v0.5` | `██████████` 4/4 |
-| 🔄 | **09** ◀ now | 28 Sep – 4 Oct | 🗺️ Map tracking, gas analysis, real sensors, docs | `v0.6 / v1.0` | `████████░░` 8/10 |
+| 🔄 | **09** ◀ now | 28 Sep – 4 Oct | 🗺️ Map tracking, gas analysis, real sensors, docs | `v0.6 / v1.0` | `████████░░` 9/11 |
 | ⏳ | 10 | 5 Oct – 11 Oct | 🧪 Body unit bench test + calibration | `v1.1` | `░░░░░░░░░░` 0/4 |
 | ⏳ | 11 | 12 Oct – 18 Oct | 🤖 AI kit dataset + entry flow + kit-removal | `v1.2` | `░░░░░░░░░░` 0/3 |
 | ⏳ | 12 | 19 Oct – 25 Oct | 🔋 Power, enclosure, range test | `v1.3` | `░░░░░░░░░░` 0/3 |
@@ -145,7 +145,7 @@ gantt
 </details>
 
 <details open>
-<summary>🗺️ <b>Week 09</b> · 28 Sep – 4 Oct · Map tracking, gas analysis, real sensors, docs · <code>v0.6 / v1.0</code> · 8/10 · <b>◀ now</b></summary>
+<summary>🗺️ <b>Week 09</b> · 28 Sep – 4 Oct · Map tracking, gas analysis, real sensors, docs · <code>v0.6 / v1.0</code> · 9/11 · <b>◀ now</b></summary>
 
 - [x] Tunnel map + GPS-free tracking (steps, heading, repeater check-points) — <sub>Location & map</sub>
 - [x] Direction-aware map snapping + demo walker — <sub>Location & map</sub>
@@ -155,7 +155,8 @@ gantt
 - [x] 12–15 min presentation (22 slides) — <sub>Docs & review</sub>
 - [x] Notion wiki, BOM and test log — <sub>Docs & review</sub>
 - [x] Structured GitHub repo with version history v0.0 → v1.0 — <sub>Docs & review</sub>
-- [ ] Add guide name and DGMS statistic to the deck — <sub>Docs & review</sub> *(in progress)*
+- [x] Add guide name and branch to deck, Notion and GitHub — <sub>Docs & review</sub>
+- [ ] Add DGMS accident statistic to the deck — <sub>Docs & review</sub> *(in progress)*
 - [ ] Attach literature review document to References — <sub>Docs & review</sub> *(in progress)*
 
 </details>
@@ -221,7 +222,7 @@ gantt
 | Gas | 2 | 0 | `██████████` 100 % |
 | Body unit | 3 | 3 | `█████░░░░░` 50 % |
 | Location & map | 2 | 1 | `███████░░░` 67 % |
-| Docs & review | 3 | 6 | `███░░░░░░░` 33 % |
+| Docs & review | 4 | 6 | `████░░░░░░` 40 % |
 
 ## 🏷️ Versions
 
@@ -237,4 +238,4 @@ timeline
     Oct–Nov : v1.1–v1.4 Bench test, AI dataset, power, full trial : v2.0 Final release
 ```
 
-<div align="center"><sub>Manas Pednekar · Amey Satale · Aaryaa Kanojia · TCET Mumbai · 2026–27</sub></div>
+<div align="center"><sub>Manas Pednekar · Amey Satale · Aaryaa Kanojia · Guide: Mr Dipesh Tare, Assistant Professor<br>Mechanical and Mechatronics Engineering · TCET Mumbai · 2026–27</sub></div>
