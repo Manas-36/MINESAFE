@@ -241,7 +241,8 @@ timeline
     Late Sep : v0.5 First end-to-end run
     Oct wk 1 : v0.6 Map tracking, gas analysis, real sensors : v1.0 Repo, docs, slides, Notion
     Oct wk 2 : V3 (v3.0) Camera entry station, mock worker, schematics
-    Oct–Nov : v3.1–v3.3 AI dataset, power, full trial : v4.0 Final release, Zigbee next
+    Oct wk 2–3 : v3.1 AHT air sensing : v3.2 Sensor integration and calibration (now)
+    Nov onward : V4 Own PCBs and sensor boards
 ```
 
 <div align="center"><sub>Manas Pednekar · Amey Satale · Aaryaa Kanojia · Guide: Mr Dipesh Tare, Assistant Professor<br>Mechanical and Mechatronics Engineering · TCET Mumbai · 2026–27</sub></div>

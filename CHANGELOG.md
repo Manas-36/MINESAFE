@@ -7,8 +7,8 @@ Each version is one commit on `main` and has its own branch, `version/v0.0` … 
 |---|---|---|---|---|
 | **V1** | Body ESP only, repeaters on Wi-Fi, data stored in the cloud | Wi-Fi + internet | No website — data extracted by hand | [docs/v1.md](docs/v1.md) |
 | **V2** | Body ESP ↔ repeaters over ESP-NOW, entry station, AI kit check, map, gas (git v0.0–v1.0) | ESP-NOW chain → Wi-Fi to laptop | Control-room website | [docs/v2.md](docs/v2.md) |
-| **V3** | Camera entry station, mock worker, XIAO C6 repeaters, schematics (v3.0) | ESP-NOW | Website + camera entry | [docs/v3.md](docs/v3.md) |
-| **V4** | Final release, then Zigbee on ESP32-C6 | Zigbee (planned) | — | — |
+| **V3** | Camera entry station, XIAO C6 repeaters, AHT air sensing, sensor integration — **in calibration, not complete** (v3.0–v3.2) | ESP-NOW | Website + camera entry | [docs/v3.md](docs/v3.md) |
+| **V4** | **Our own PCBs and sensor boards** (body unit, repeater, entry station) replacing breadboard wiring | ESP-NOW | Website | [docs/v4.md](docs/v4.md) (planned) |
 
 Detailed git versions below (v0.0–v1.0 make up V2).
 
@@ -77,6 +77,14 @@ Detailed git versions below (v0.0–v1.0 make up V2).
 - [ ] Entry station connected to the hub over Wi-Fi
 - [ ] Kit-removal sensing (helmet IR sensor, vest buckle reed switch)
 - [ ] Battery, enclosure, demo video
+
+## v3.2 — Sensor integration and calibration (in progress)
+Status: **V3 is being calibrated — not complete.** Sensors are being integrated and checked one board at a time before V4 moves everything onto our own PCBs.
+- `firmware/body_node`: own pin map for the **ESP32-C6-WROOM-1 DevKit** (SDA 6, SCL 7, DS18B20 10, HW-827 2, button 18, LED 19), picked automatically on *ESP32C6 Dev Module*; output on **both** USB and UART sockets so the Serial Monitor works whatever the *USB CDC On Boot* setting.
+- `firmware/tests/body_sensor_test`: PASS / FAIL for MPU6050, BMP180, MAX3010x, DS18B20, HW-827, button and LED; live readings; **wire check** (pull-up test) and **`f` pin finder**.
+- `firmware/tests/entry_hw_test`: XIAO ESP32-S3 Sense — PN532 RFID, OLED, three buttons, camera; live photo at `http://<station IP>/`.
+- `docs/wiring.md`: C6 DevKit body-unit table.
+- Bench: Serial output on the C6 DevKit confirmed, HW-827 reading (~2.1 V at rest); I²C sensors and DS18B20 not yet answering — wiring being checked.
 
 ## v3.1 — AHT air temperature + humidity on repeaters
 - `firmware/repeater_node`: AHT10/20/25 on I²C (XIAO C6 SDA D4 / SCL D5, ESP32-S3 GPIO8 / 9), own non-blocking driver, `AHT_ENABLED`; reading every 2 s; sent in the repeater status (`airT`, `airH` appended — V2 repeaters still decode) and as `air_t` / `air_h` in the hub JSON; phone test page shows it; Serial `a` command.

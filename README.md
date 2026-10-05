@@ -2,10 +2,10 @@
 
 <img src="docs/images/logo.png" alt="MineSafe logo" width="360">
 
-**Intelligent Safety Gear Compliance, Health Monitoring and Navigation System for Miners**<br>
+**Integrated Worker Safety and Health Monitoring System for Mining Operations**<br>
 Capstone project · B.E. Mechanical and Mechatronics Engineering · Thakur College of Engineering and Technology (TCET), Mumbai · 2026–27
 
-[![Progress](https://img.shields.io/badge/progress-71%25-F2A900?style=flat-square)](ROADMAP.md) [![Week](https://img.shields.io/badge/now-week_9_of_14-1f6feb?style=flat-square)](ROADMAP.md) [![Version](https://img.shields.io/badge/version-V3_(v3.1)-2ea44f?style=flat-square)](CHANGELOG.md) ![ESP32](https://img.shields.io/badge/ESP32-ESP--NOW-E7352C?style=flat-square&logo=espressif&logoColor=white) ![Python](https://img.shields.io/badge/hub-Flask-3776AB?style=flat-square&logo=python&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)](LICENSE)
+[![Progress](https://img.shields.io/badge/progress-71%25-F2A900?style=flat-square)](ROADMAP.md) [![Week](https://img.shields.io/badge/now-week_9_of_14-1f6feb?style=flat-square)](ROADMAP.md) [![Version](https://img.shields.io/badge/version-V3_calibrating-F2A900?style=flat-square)](CHANGELOG.md) [![Next](https://img.shields.io/badge/next-V4_custom_PCBs-8957e5?style=flat-square)](docs/v4.md) ![ESP32](https://img.shields.io/badge/ESP32-ESP--NOW-E7352C?style=flat-square&logo=espressif&logoColor=white) ![Python](https://img.shields.io/badge/hub-Flask-3776AB?style=flat-square&logo=python&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)](LICENSE)
 
 </div>
 
@@ -57,7 +57,18 @@ Raw double integration of acceleration drifts by ~175 m in a minute, so MineSafe
 
 ## Progress
 
-**Major versions:** [V1](docs/v1.md) Wi-Fi + cloud, no website → [V2](docs/v2.md) ESP-NOW chain + control-room website → **[V3](docs/v3.md) camera entry station + mock worker (now)** → V4 final + Zigbee
+### Current status (5 Oct 2026)
+
+> **V3 is in calibration — not complete yet.** The software (hub, dashboard, map, alerts, gas + air) works with the simulator and the first hardware runs. We are now integrating and calibrating the sensors one board at a time:
+>
+> - **Body unit on the ESP32-C6-WROOM-1 DevKit** — own pin map in `body_node`; sensors checked with [`firmware/tests/body_sensor_test`](firmware/tests/body_sensor_test) (wire check + pin finder). Currently fixing the I²C / DS18B20 wiring.
+> - **Entry station on the XIAO ESP32-S3 Sense** — PN532 RFID antenna + OLED + buttons + on-board camera, checked with [`firmware/tests/entry_hw_test`](firmware/tests/entry_hw_test) (live photo in the browser).
+> - **Repeaters (XIAO ESP32-C6)** — chain, buzzer, MQ gas and AHT air sensor working on the bench (31.3 °C / 62 % RH).
+>
+> **V4 — our own PCBs and sensor boards.** Once V3 is calibrated, the breadboard wiring is replaced by custom-designed PCBs: a compact body-unit board with the sensors on it, a repeater board and an entry-station board — see [docs/v4.md](docs/v4.md).
+
+
+**Major versions:** [V1](docs/v1.md) Wi-Fi + cloud, no website → [V2](docs/v2.md) ESP-NOW chain + control-room website → **[V3](docs/v3.md) camera entry station + sensor integration (now, calibrating)** → **[V4](docs/v4.md) our own PCBs and sensor boards**
 
 **42 / 59 tasks done · Week 9 of 14** `████████████████████░░░░░░░░░░` → full week-by-week plan, Gantt chart and checklist in **[ROADMAP.md](ROADMAP.md)**
 
@@ -73,7 +84,8 @@ Raw double integration of acceleration drifts by ~175 m in a minute, so MineSafe
 | v1.0 | Structured repo, docs, presentation, Notion | ✅ |
 | **V3 · v3.0** | Camera entry station (XIAO S3 Sense), mock worker, schematics, admin theme, research docs — [docs/v3.md](docs/v3.md) | ✅ software · 🔧 hardware test next |
 | v3.1 | AHT air temperature + humidity on every repeater, shown in the admin with wet-bulb heat warnings | ✅ software · 🔧 hardware test next |
-| v4.x | Zigbee (802.15.4) network on ESP32-C6 nodes | 📋 planned |
+| v3.2 | Body unit on ESP32-C6-WROOM-1 DevKit, sensor + entry hardware test sketches, serial on both USB sockets | 🔧 calibrating sensors |
+| **V4** | Custom PCBs: body-unit sensor board, repeater board, entry-station board — [docs/v4.md](docs/v4.md) | 📋 planned |
 
 Every version has its own branch (`version/v0.0` … `version/v1.0`) — see [CHANGELOG.md](CHANGELOG.md) for what changed and [docs/decisions.md](docs/decisions.md) for why.
 
