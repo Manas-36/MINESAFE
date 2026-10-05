@@ -5,7 +5,7 @@
 //          http://<laptop-ip>:5000/phone and is matched with the scanned tags on the hub.
 //          Still builds for the XIAO ESP32-S3 Sense (built-in camera, PSRAM: "OPI PSRAM").
 //          Arduino ESP32 core 3.x.
-//  Parts : PN532 NFC (I2C mode), SSD1306 0.96" 128x64 I2C OLED,
+//  Parts : PN532 NFC module HW-147C (red board, I2C mode), SSD1306 0.96" 128x64 I2C OLED,
 //          3 push buttons (READ, WRITE, PHOTO), NTAG215 tags, OV2640/OV3660 camera (Sense board)
 //  Libs  : Adafruit PN532 (latest), Adafruit SSD1306, Adafruit GFX
 //

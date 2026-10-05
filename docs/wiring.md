@@ -84,6 +84,8 @@ From v3.2 the scanning system runs on an **ESP32-C6** (no camera — the entry p
 | PHOTO button (→ GND, optional) | GPIO20 | D3 |
 | PN532 DIP switch | I2C: 1 ON, 2 OFF | same |
 
+**PN532 module: HW-147C** (red PN532 NFC V3 board). Use the **4-pin header** (GND, VCC, SDA, SCL); the 8-pin SPI header (IRQ, RSTO …) stays empty. DIP switch for I2C: **switch 1 ON, switch 2 OFF** (HSU = both OFF, SPI = 1 OFF / 2 ON) — set it with the power off. Power it from **3V3** so the I²C lines stay at 3.3 V. Address **0x24**; tags read within ~3–5 cm of the antenna (the white coil area).
+
 Libraries: *Adafruit PN532*, *Adafruit SSD1306*, *Adafruit GFX* (+ *Adafruit BusIO*).
 
 ## Entry station (XIAO ESP32-S3 Sense, earlier V3 option with camera)
