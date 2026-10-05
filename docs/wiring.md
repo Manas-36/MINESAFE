@@ -71,7 +71,22 @@ A temperature-only demo worker. Flash `body_node` with `BODY_ID "BODY-02"`, `MOC
 
 The hub shows its temperature and gives no motion-sensor warning (flag `BF_NO_MOTION = 512`).
 
-## Entry station (XIAO ESP32-S3 Sense)
+## Entry station / scanning system (ESP32-C6)
+From v3.2 the scanning system runs on an **ESP32-C6** (no camera — the entry photo is taken on the phone page `http://<laptop-ip>:5000/phone` and matched with the scanned tags on the hub). Check it first with `firmware/tests/entry_hw_test`.
+
+| Connection | ESP32-C6-WROOM-1 DevKit | XIAO ESP32-C6 |
+|---|---|---|
+| PN532 + SSD1306 OLED VCC / GND | 3V3 / GND | 3V3 / GND |
+| PN532 + OLED SDA | GPIO6 | D4 (GPIO22) |
+| PN532 + OLED SCL | GPIO7 | D5 (GPIO23) |
+| READ button (→ GND) | GPIO18 | D1 |
+| WRITE button (→ GND) | GPIO19 | D0 |
+| PHOTO button (→ GND, optional) | GPIO20 | D3 |
+| PN532 DIP switch | I2C: 1 ON, 2 OFF | same |
+
+Libraries: *Adafruit PN532*, *Adafruit SSD1306*, *Adafruit GFX* (+ *Adafruit BusIO*).
+
+## Entry station (XIAO ESP32-S3 Sense, earlier V3 option with camera)
 
 ![Entry station schematic](wiring/entry_station.svg)
 

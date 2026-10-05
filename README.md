@@ -62,7 +62,8 @@ Raw double integration of acceleration drifts by ~175 m in a minute, so MineSafe
 > **V3 is in calibration — not complete yet.** The software (hub, dashboard, map, alerts, gas + air) works with the simulator and the first hardware runs. We are now integrating and calibrating the sensors one board at a time:
 >
 > - **Body unit on the ESP32-C6-WROOM-1 DevKit** — own pin map in `body_node`; sensors checked with [`firmware/tests/body_sensor_test`](firmware/tests/body_sensor_test) (wire check + pin finder). Currently fixing the I²C / DS18B20 wiring.
-> - **Entry station on the XIAO ESP32-S3 Sense** — PN532 RFID antenna + OLED + buttons + on-board camera, checked with [`firmware/tests/entry_hw_test`](firmware/tests/entry_hw_test) (live photo in the browser).
+> - **Scanning system (entry station) on an ESP32-C6** — PN532 RFID antenna + OLED + buttons, checked with [`firmware/tests/entry_hw_test`](firmware/tests/entry_hw_test); entry photo from the phone page. (The XIAO S3 Sense camera build is kept as an option.)
+> - **Sensor code cross-checked** against the standard libraries and datasheets; [`firmware/tests/body_lib_test`](firmware/tests/body_lib_test) reads every body sensor with the well-known Arduino libraries.
 > - **Repeaters (XIAO ESP32-C6)** — chain, buzzer, MQ gas and AHT air sensor working on the bench (31.3 °C / 62 % RH).
 >
 > **V4 — our own PCBs and sensor boards.** Once V3 is calibrated, the breadboard wiring is replaced by custom-designed PCBs: a compact body-unit board with the sensors on it, a repeater board and an entry-station board — see [docs/v4.md](docs/v4.md).

@@ -84,6 +84,9 @@ Status: **V3 is being calibrated — not complete.** Sensors are being integrate
 - `firmware/tests/body_sensor_test`: PASS / FAIL for MPU6050, BMP180, MAX3010x, DS18B20, HW-827, button and LED; live readings; **wire check** (pull-up test) and **`f` pin finder**.
 - `firmware/tests/entry_hw_test`: XIAO ESP32-S3 Sense — PN532 RFID, OLED, three buttons, camera; live photo at `http://<station IP>/`.
 - `docs/wiring.md`: C6 DevKit body-unit table.
+- **Scanning system moved to the ESP32-C6** (C6-WROOM-1 DevKit: PN532 + OLED SDA 6 / SCL 7, buttons 18 / 19 / 20; XIAO C6 on D4 / D5, D1 / D0 / D3). No camera on the C6 → entry photo from the phone page. `entry_station` and `entry_hw_test` build for C6 DevKit, XIAO C6 and XIAO S3 Sense.
+- Body drivers cross-checked: BMP180 maths gives the Bosch datasheet example exactly (15.0 °C, 69964 Pa); MPU6050 set-up matches the Electronic Cats library (reset, PLL clock, DLPF 3, 100 Hz, ±500 °/s, ±8 g); 1-Wire timings match Maxim AN126 / OneWire; MAX3010x registers match the SparkFun library.
+- `firmware/tests/body_lib_test`: same sensors read with Adafruit BMP085, Electronic Cats MPU6050, OneWire + DallasTemperature, SparkFun MAX3010x — tells wiring faults from code faults.
 - Bench: Serial output on the C6 DevKit confirmed, HW-827 reading (~2.1 V at rest); I²C sensors and DS18B20 not yet answering — wiring being checked.
 
 ## v3.1 — AHT air temperature + humidity on repeaters

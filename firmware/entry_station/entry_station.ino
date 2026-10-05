@@ -1,18 +1,23 @@
 // =====================================================================
 //  MineSafe - ENTRY STATION v3 (RFID gear tags + camera photo)
-//  Board : Seeed XIAO ESP32-S3 Sense (camera)  - also builds for XIAO ESP32-C6 (no camera)
-//          Arduino ESP32 core 3.x. XIAO S3: Tools -> PSRAM: "OPI PSRAM".
+//  Board : ESP32-C6 (scanning system, no camera): ESP32-C6-WROOM-1 DevKit ("ESP32C6 Dev Module")
+//          or Seeed XIAO ESP32-C6 ("XIAO_ESP32C6"). The entry photo comes from the phone page
+//          http://<laptop-ip>:5000/phone and is matched with the scanned tags on the hub.
+//          Still builds for the XIAO ESP32-S3 Sense (built-in camera, PSRAM: "OPI PSRAM").
+//          Arduino ESP32 core 3.x.
 //  Parts : PN532 NFC (I2C mode), SSD1306 0.96" 128x64 I2C OLED,
 //          3 push buttons (READ, WRITE, PHOTO), NTAG215 tags, OV2640/OV3660 camera (Sense board)
 //  Libs  : Adafruit PN532 (latest), Adafruit SSD1306, Adafruit GFX
 //
-//  WIRING (PN532 and OLED share I2C: PN532=0x24, OLED=0x3C)      XIAO S3     XIAO C6
+//  WIRING (PN532 and OLED share I2C: PN532=0x24, OLED=0x3C; PN532 DIP: I2C = 1 ON, 2 OFF)
+//                                          C6-WROOM-1 DevKit   XIAO C6        XIAO S3 Sense
 //    PN532 VCC / OLED VCC -> 3V3      PN532 GND / OLED GND -> GND
-//    PN532 SDA / OLED SDA -> D4                                    GPIO5       GPIO22
-//    PN532 SCL / OLED SCL -> D5                                    GPIO6       GPIO23
-//    READ  button  -> D1 and GND   (internal pull-up)              GPIO2       GPIO1
-//    WRITE button  -> D0 and GND   (internal pull-up)              GPIO1       GPIO0
-//    PHOTO button  -> D3 and GND   (internal pull-up)              GPIO4       GPIO21
+//    PN532 SDA / OLED SDA              GPIO6               D4 (GPIO22)    D4 (GPIO5)
+//    PN532 SCL / OLED SCL              GPIO7               D5 (GPIO23)    D5 (GPIO6)
+//    READ  button  -> GND              GPIO18              D1 (GPIO1)     D1 (GPIO2)
+//    WRITE button  -> GND              GPIO19              D0 (GPIO0)     D0 (GPIO1)
+//    PHOTO button  -> GND (optional)   GPIO20              D3 (GPIO21)    D3 (GPIO4)
+//    (buttons use the internal pull-up, no resistors)
 //    Camera: plugged into the Sense expansion board (B2B connector), no wires.
 //
 //  HOW IT WORKS
@@ -49,6 +54,34 @@
   #define HAS_CAMERA 0
 #endif
 
+// ---- print to BOTH the USB socket and the UART/COM socket, so the Serial Monitor
+//      shows output whatever the "USB CDC On Boot" setting or the socket you use ----
+#if ARDUINO_USB_MODE && SOC_USB_SERIAL_JTAG_SUPPORTED
+#include "HWCDC.h"
+#if ARDUINO_USB_CDC_ON_BOOT
+  #define USB_PORT HWCDCSerial
+#else
+  HWCDC UsbPort;
+  #define USB_PORT UsbPort
+#endif
+class DualSerial : public Print {
+ public:
+  void begin(unsigned long baud) {
+    Serial0.begin(baud);
+    USB_PORT.begin();
+    USB_PORT.setTxTimeoutMs(0);             // never block when no USB monitor is open
+  }
+  size_t write(uint8_t c) override { Serial0.write(c); if (USB_PORT) USB_PORT.write(c); return 1; }
+  size_t write(const uint8_t* b, size_t n) override { Serial0.write(b, n); if (USB_PORT) USB_PORT.write(b, n); return n; }
+  int available() { return Serial0.available() + USB_PORT.available(); }
+  int read() { return Serial0.available() ? Serial0.read() : USB_PORT.read(); }
+  operator bool() { return (bool)USB_PORT; }
+};
+DualSerial DualOut;
+#undef Serial
+#define Serial DualOut
+#endif
+
 // ------------------------- CONFIG ------------------------------------
 // Copy secrets.example.h to secrets.h and fill it in (not uploaded to GitHub).
 #if __has_include("secrets.h")
@@ -62,9 +95,19 @@ const char* STATION_ID = "ENTRY-01";
 
 #define PN532_IRQ    -1   // not wired - update "Adafruit PN532" to the latest version (1.3.x)
 #define PN532_RESET  -1   // not wired
-#define BTN_READ     D1
-#define BTN_WRITE    D0
-#define BTN_PHOTO    D3
+#if CONFIG_IDF_TARGET_ESP32C6 && !defined(ARDUINO_XIAO_ESP32C6)   // ESP32-C6-WROOM-1 DevKit
+  #define I2C_SDA    6
+  #define I2C_SCL    7
+  #define BTN_READ   18
+  #define BTN_WRITE  19
+  #define BTN_PHOTO  20
+#else                                                             // XIAO C6 / XIAO S3 Sense
+  #define I2C_SDA    SDA      // D4
+  #define I2C_SCL    SCL      // D5
+  #define BTN_READ   D1
+  #define BTN_WRITE  D0
+  #define BTN_PHOTO  D3
+#endif
 #define HUB_AUTOFIND 1    // find the hub on the subnet if the laptop IP changed
 #define HUB_PORT     5000
 #define COUNTDOWN_S  3    // photo countdown
@@ -378,7 +421,7 @@ bool camBegin() {                     // Seeed XIAO ESP32-S3 Sense pin map
 
 void takeAndSendPhoto() {
 #if !HAS_CAMERA
-  showResult(false, "NO CAM", "This board has", "no camera - use phone");
+  showResult(false, "USE PHONE", "Photo on phone:", "<laptop-ip>:5000/phone");
 #else
   if (!camOk) { showResult(false, "NO CAM", "Camera not found", "Check Sense board"); return; }
   for (int i = COUNTDOWN_S; i > 0; i--) {             // let the worker stand still
@@ -520,6 +563,7 @@ void setup() {
   pinMode(BTN_WRITE, INPUT_PULLUP);
   pinMode(BTN_PHOTO, INPUT_PULLUP);
   initHubBase();
+  Wire.begin(I2C_SDA, I2C_SCL);       // set the pins first; the PN532 / OLED libraries then reuse this bus
 
   if (!oled.begin(SSD1306_SWITCHCAPVCC, 0x3C)) Serial.println("OLED not found");
   oled.clearDisplay();
