@@ -78,6 +78,13 @@ Detailed git versions below (v0.0–v1.0 make up V2).
 - [ ] Kit-removal sensing (helmet IR sensor, vest buckle reed switch)
 - [ ] Battery, enclosure, demo video
 
+## v3.3 — Exit-sign repeaters, evacuation routes, gas limits
+The tested v3.1 repeater is frozen on branch [`version/v3.1-repeater-final`](https://github.com/Manas-36/MINESAFE/tree/version/v3.1-repeater-final).
+- `firmware/repeater_node`: **MAX7219 8×32 LED matrix exit sign** (own driver; arrow + distance, `EXIT`, `NO GO`, `DANGR`, `GAS!`, `SOS`, `ALERT`; dim name/air display in normal times), buzzer kept with an evacuation pattern; **up to 3 MQ gas sensors** (`GAS_CHANNELS`, D2 / D0 / D1); **SOS button** (hold 1.5 s); the hub's evacuation guide travels down the chain at the end of every beacon (old body units / repeaters ignore the extra bytes). Serial `d` = display test, `s` = SOS.
+- `hub/admin_hub.py`: **Limits tab** — every gas (CH₄, CO, H₂S, NO₂, SO₂, NH₃, CO₂, H₂, O₂ low, LPG …) with editable warning / danger / alarm and its source (CMR 2017 reg. 153, NIOSH/OSHA), body and heat limits, sensor model per gas channel (MQ-136 and MQ-8 added), auto-evacuation settings. **Exits** and **🔥 Emergency** danger zones on the map; tunnel network with automatic junctions; shortest safe route (Dijkstra, danger zones avoided when possible) for every worker and an arrow + distance for every repeater's sign; START / END EVACUATION; auto evacuation when a gas reaches danger; exit-sign confirmation count; SOS-at-repeater incidents; direct-reading sensors accepted (`"direct"`).
+- `tools/sim_repeater.py`: 3 gas channels per repeater, `gas` option (methane rises at REP-03), echoes the guide.
+- Docs: [gas limits](docs/gas_limits.md), [final BOM](docs/final_bom.md), [running from Desktop\MINESAFE](docs/run_on_laptop.md), wiring for the matrix / extra gas sensors / SOS.
+
 ## v3.2 — Sensor integration and calibration (in progress)
 Status: **V3 is being calibrated — not complete.** Sensors are being integrated and checked one board at a time before V4 moves everything onto our own PCBs.
 - `firmware/body_node`: own pin map for the **ESP32-C6-WROOM-1 DevKit** (SDA 6, SCL 7, DS18B20 10, HW-827 2, button 18, LED 19), picked automatically on *ESP32C6 Dev Module*; output on **both** USB and UART sockets so the Serial Monitor works whatever the *USB CDC On Boot* setting.

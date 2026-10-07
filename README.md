@@ -86,6 +86,7 @@ Raw double integration of acceleration drifts by ~175 m in a minute, so MineSafe
 | **V3 · v3.0** | Camera entry station (XIAO S3 Sense), mock worker, schematics, admin theme, research docs — [docs/v3.md](docs/v3.md) | ✅ software · 🔧 hardware test next |
 | v3.1 | AHT air temperature + humidity on every repeater, shown in the admin with wet-bulb heat warnings | ✅ software · 🔧 hardware test next |
 | v3.2 | Body unit on ESP32-C6-WROOM-1 DevKit, sensor + entry hardware test sketches, serial on both USB sockets | 🔧 calibrating sensors |
+| v3.3 | Repeater exit sign (LED matrix) + evacuation routes to the nearest safe exit, 3 gas sensors per repeater, editable gas limits (CMR 2017 / NIOSH) — [gas limits](docs/gas_limits.md) · [final BOM](docs/final_bom.md) · [run guide](docs/run_on_laptop.md) | ✅ software · 🔧 hardware next |
 | **V4** | Custom PCBs: body-unit sensor board, repeater board, entry-station board — [docs/v4.md](docs/v4.md) | 📋 planned |
 
 Every version has its own branch (`version/v0.0` … `version/v1.0`) — see [CHANGELOG.md](CHANGELOG.md) for what changed and [docs/decisions.md](docs/decisions.md) for why.

@@ -11,6 +11,10 @@
 # every second with the body packets and the status of every repeater in the chain.
 # When you press ALERT, the fake repeaters start "buzzing" one hop at a time and
 # the fake body units report their red LED on. Stop with Ctrl+C.
+#
+# v3.3: every repeater reports 3 gas sensors (channels 1-3) and echoes the evacuation guide.
+#   python sim_repeater.py http://127.0.0.1:5000 gas   -> methane rises at REP-03 after ~45 s
+#   (with "auto evacuation" on, the hub then starts an evacuation by itself)
 
 import json
 import math
@@ -19,7 +23,9 @@ import sys
 import time
 import urllib.request
 
-HUB = (sys.argv[1] if len(sys.argv) > 1 else "http://localhost:5000").rstrip("/")
+HUB = (sys.argv[1] if len(sys.argv) > 1 and sys.argv[1].startswith("http") else "http://localhost:5000").rstrip("/")
+GAS_EVENT = "gas" in sys.argv[1:]
+guide = {"id": 0, "evac": 0, "g": []}
 F_FALL, F_NOMOTION, F_IMPACT, F_SOS, F_MPU, F_TEMP, F_LED = 1, 2, 4, 8, 16, 32, 64
 
 CHAIN = {  # repeater -> (hops to main, parent)
@@ -76,16 +82,28 @@ def make_packet(bid, b, t):
             "path": path_from(near)}
 
 
+def gas_mv(rep, ch, t):
+    base = {1: 900, 2: 600, 3: 750}[ch] + 15 * math.sin(t / 30 + ch)
+    if GAS_EVENT and rep == "REP-03" and ch == 1 and t > 45:
+        base += min(2600, (t - 45) * 120)                # methane builds up at the deepest repeater
+    return int(base + random.uniform(-8, 8))
+
+
 def statuses(t):
     out = []
     for rep, (hop, parent) in CHAIN.items():
         aid, lvl = rep_alert[rep]
+        warm = t < 20
+        chans = [{"ch": ch, "mv": gas_mv(rep, ch, t), "warm": warm, "alarm": False, "missing": False} for ch in (1, 2, 3)]
+        code = next((c for n, c, d in guide["g"] if f"REP-{n:02d}" == rep), 0)
         out.append({"id": rep, "hop": hop, "parent": parent, "prssi": random.randint(-80, -60),
                     "alert_id": aid, "buzzing": bool(lvl), "up": int(t), "bodies": int(t) * 2,
                     "nbrs": 2 if rep == "REP-02" else 1, "path": path_from(rep),
                     # AHT air sensor: warmer and more humid deeper in the mine
                     "air_t": round(26 + 2.5 * hop + 0.6 * math.sin(t / 90 + hop), 2),
-                    "air_h": round(min(99, 58 + 14 * hop + 3 * math.sin(t / 120 + hop)), 2)})
+                    "air_h": round(min(99, 58 + 14 * hop + 3 * math.sin(t / 120 + hop)), 2),
+                    "gas_mv": chans[0]["mv"], "gas_warm": warm, "gas_alarm": False, "gas_missing": False,
+                    "gas": chans, "sos": False, "disp": True, "gcode": code, "gid": guide["id"]})
     return out
 
 
@@ -105,7 +123,12 @@ while True:
         req = urllib.request.Request(HUB + "/api/telemetry", json.dumps(body).encode(),
                                      {"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=3) as r:
-            a = json.load(r).get("alert", {})
+            resp = json.load(r)
+            a = resp.get("alert", {})
+        g = resp.get("guide")
+        if g and g.get("id") != guide["id"]:
+            guide.update(g)
+            print("GUIDE", g.get("id"), "EVACUATE" if g.get("evac") else "normal", g.get("g"))
         if a.get("id") != alert["id"]:
             alert.update(a)
             alert_seen_at = time.time()

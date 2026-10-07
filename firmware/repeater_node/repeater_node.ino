@@ -1,5 +1,8 @@
 // =====================================================================
 //  Miner Safety System - REPEATER NODE (chain / mesh) - ESP-NOW version
+//  v3.3: LED-matrix exit sign (MAX7219 8x32) + evacuation arrows, up to 3 gas sensors, SOS button.
+//        The tested v3.1 repeater (buzzer + 1 MQ + AHT only) is kept on the git branch
+//        "version/v3.1-repeater-final".
 //  Board : ESP32-S3 (N16R8 module), Arduino ESP32 core 3.x
 //          Tools -> Board: "ESP32S3 Dev Module", Flash Size: 16MB, PSRAM: OPI PSRAM
 //          Tools -> USB CDC On Boot: Enabled (cable in the "USB" port)
@@ -46,6 +49,18 @@
 //      SCL -> D5 (GPIO23) on the XIAO ESP32-C6,  GPIO9 on the ESP32-S3
 //      (the module already has its pull-up resistors). No AHT? The admin page shows "no sensor".
 //    Do not use GPIO35, 36, 37 on the N16R8 - they belong to the PSRAM.
+//
+//    LED matrix exit sign (MAX7219 "FC-16" 4-in-1 8x32 module), DISPLAY_ENABLED 1:
+//      VCC -> 5V (VBUS)  GND -> GND
+//      DIN -> D9 (GPIO20) XIAO C6 / GPIO11 S3    CS -> D3 (GPIO21) / GPIO10    CLK -> D8 (GPIO19) / GPIO12
+//      Text upside down / mirrored / letters in the wrong block?  Change MATRIX_FLIP_X / MATRIX_FLIP_Y /
+//      MATRIX_TYPE below (type 1 = "generic" modules wired column-wise). Garbled at 3.3 V logic on some
+//      modules: feed the matrix VCC from about 4.5 V (e.g. through a 1N4007 diode from 5 V).
+//    Extra gas sensors (GAS_CHANNELS 2 or 3), each AO through its own 10k / 20k divider:
+//      gas 2 -> D0 (GPIO0) XIAO C6 / GPIO6 S3     gas 3 -> D1 (GPIO1) / GPIO7
+//      Pick the sensor model for each channel on the admin page (Gas & air tab), e.g. MQ-4 methane,
+//      MQ-7 carbon monoxide, MQ-136 hydrogen sulphide.
+//    SOS button (optional): D6 (GPIO16) XIAO C6 / GPIO13 S3 -> button -> GND. Hold 1.5 s = SOS on/off.
 //
 //  SETUP FOR EACH BOARD
 //    Main repeater (near the admin laptop):  IS_GATEWAY 1, REPEATER_NO 1
@@ -102,6 +117,34 @@ const char* TEST_AP_PASS = "minesafe";  // password of the tunnel repeaters' tes
 #define GAS_LOCAL_RISE_MV  1000         // fail-safe: beeps fast by itself when the reading rises this much
                                         // above its own clean-air level (learned after warm-up)
 #define GAS_EVENT_STEP_MV  300          // tunnel repeaters report at once when gas rises this much
+
+#define GAS_CHANNELS     1    // how many MQ gas sensors are fitted: 1, 2 or 3 (channel 1 = GAS_PIN above)
+#if CONFIG_IDF_TARGET_ESP32C6
+  #define GAS2_PIN       0    // XIAO ESP32-C6: D0
+  #define GAS3_PIN       1    // XIAO ESP32-C6: D1
+#else
+  #define GAS2_PIN       6    // ESP32-S3: GPIO6
+  #define GAS3_PIN       7    // ESP32-S3: GPIO7
+#endif
+
+#define DISPLAY_ENABLED  1    // 1 = MAX7219 8x32 LED matrix exit sign fitted (shows nothing harmful if it is missing)
+#if CONFIG_IDF_TARGET_ESP32C6
+  #define MX_DIN         20   // XIAO ESP32-C6: D9
+  #define MX_CS          21   // XIAO ESP32-C6: D3
+  #define MX_CLK         19   // XIAO ESP32-C6: D8
+  #define SOS_PIN        16   // XIAO ESP32-C6: D6
+#else
+  #define MX_DIN         11
+  #define MX_CS          10
+  #define MX_CLK         12
+  #define SOS_PIN        13
+#endif
+#define MATRIX_MODULES   4    // 4 x 8x8 = 32 columns
+#define MATRIX_TYPE      0    // 0 = FC-16 modules (most common blue 4-in-1 boards), 1 = "generic" column-wise modules
+#define MATRIX_FLIP_X    0    // 1 = text comes out mirrored left-right
+#define MATRIX_FLIP_Y    0    // 1 = text is upside down
+#define MATRIX_REVERSE   0    // 1 = the four blocks show their parts in the wrong order
+#define SOS_ENABLED      1    // 1 = SOS button on SOS_PIN (hold 1.5 s)
 
 #define AHT_ENABLED      1    // 1 = read an AHT10/AHT20/AHT25 air temperature + humidity sensor, 0 = none
 #if CONFIG_IDF_TARGET_ESP32C6
@@ -174,8 +217,21 @@ struct __attribute__((packed)) MsStatus {
   uint8_t  gasFlags;      // bit0 warming up, bit1 local alarm, bit2 sensor missing
   int16_t  airT;          // air temperature from the AHT, 0.01 C (0x7FFF = no sensor)
   uint16_t airH;          // air humidity from the AHT, 0.01 % RH (0xFFFF = no sensor)
+  // v3.3
+  uint16_t gas2Mv, gas3Mv;  // extra gas channels, mV (0xFFFF = channel not fitted)
+  uint8_t  gasFlags2, gasFlags3;
+  uint8_t  repFlags;      // bit0 SOS active, bit1 display fitted
+  uint8_t  guideCode;     // what the exit sign shows (see GUIDE codes)
+  uint32_t guideId;       // evacuation guide this repeater is showing
 };
-#define MS_STATUS_V2_LEN (sizeof(MsStatus) - 4)   // V2 repeaters send the status without airT / airH
+#define MS_STATUS_V2_LEN  21   // V2 repeaters: no airT / airH
+#define MS_STATUS_V31_LEN 25   // v3.1 repeaters: no extra gas channels / SOS / guide
+// evacuation guide, sent by the hub and carried down the chain at the end of every beacon
+struct __attribute__((packed)) GuideEntry { uint8_t rep, code; uint16_t dist; };   // dist in metres
+struct __attribute__((packed)) MsGuideHdr { char tag[2]; uint32_t id; uint8_t evac, n; };
+#define GUIDE_MAX 40
+// guide codes: what this repeater's sign shows (low 4 bits) + 0x10 = this repeater is inside the danger zone
+enum : uint8_t { G_NONE = 0, G_LEFT = 1, G_RIGHT = 2, G_UP = 3, G_HERE = 4, G_NOWAY = 5, G_DANGER = 0x10 };
 struct __attribute__((packed)) MsUpHdr {
   char     magic[2];
   uint8_t  ver, type;
@@ -187,6 +243,7 @@ struct __attribute__((packed)) MsUpHdr {
 };
 enum : uint8_t { UP_TELEM = 1, UP_STATUS = 2 };
 struct RxPacket { uint8_t len; uint8_t data[250]; int8_t rssi; };
+struct Glyph { char c; uint8_t w; uint8_t col[5]; };     // LED-matrix font character
 struct Neighbor { uint8_t rep, hop; int8_t rssi; uint32_t seen; };
 // (types live up here: the Arduino IDE declares every function at the top of the sketch)
 // =====================================================================
@@ -243,6 +300,16 @@ int      lastHubCode = 0;
 uint16_t statusSeq = 0;
 uint16_t gasMv = 0;
 uint8_t  gasFlags = GAS_ENABLED ? 1 : 4;
+uint16_t gasMvX[3] = {0, 0xFFFF, 0xFFFF};   // all channels (index 0 = gasMv)
+uint8_t  gasFlagsX[3] = {1, 4, 4};
+bool     sosActive = false;
+bool     displayOk = false;
+uint32_t guideId = 0;                   // evacuation guide (0 = none yet)
+uint8_t  guideEvac = 0;                 // 1 = evacuation in progress
+uint8_t  guideN = 0;
+GuideEntry guideTab[GUIDE_MAX];
+uint8_t  myCode = G_NONE;               // this repeater's own instruction
+uint16_t myDist = 0;
 int16_t  airT = 0x7FFF;                 // AHT air temperature, 0.01 C (0x7FFF = no sensor)
 uint16_t airH = 0xFFFF;                 // AHT air humidity, 0.01 % RH (0xFFFF = no sensor)
 bool     statusNow = false;
@@ -273,49 +340,65 @@ void copyTelem(MsTelem& t, const uint8_t* data, int len) {
 }
 
 // ------------------------- gas ---------------------------------------
-void readGas(uint32_t now) {
-#if GAS_ENABLED
-  static uint32_t last = 0;
-  static uint16_t lastReported = 0;
-  if (now - last < 500) return;
-  last = now;
+// Up to 3 MQ sensors, each on its own analog pin through a 10k / 20k divider.
+// Channel 1 also keeps the old gasMv / gasFlags names (v3.1 status fields).
+const uint8_t GAS_PINS[3] = {GAS_PIN, GAS2_PIN, GAS3_PIN};
+struct GasCh { bool present = false; uint32_t lastCheck = 0; float base = 0; uint16_t lastReported = 0; };
+GasCh gasCh[3];
+
+void readGasChannel(uint8_t c, uint32_t now) {
+  GasCh& g = gasCh[c];
+  uint8_t pin = GAS_PINS[c];
   // Is a sensor really connected? An empty pin "floats" and reads random voltages (often
   // 1.5-2.5 V), which would look like gas. Every 5 s pull the pin down for a moment: an empty
   // pin drops to ~0 V, a pin driven by the sensor through the divider stays up.
-  static bool present = false;
-  static uint32_t lastCheck = 0;
-  if (!lastCheck || now - lastCheck > 5000) {
-    lastCheck = now | 1;
-    pinMode(GAS_PIN, INPUT_PULLDOWN);
+  if (!g.lastCheck || now - g.lastCheck > 5000) {
+    g.lastCheck = now | 1;
+    pinMode(pin, INPUT_PULLDOWN);
     delay(2);
     uint32_t pd = 0;
-    for (int i = 0; i < 8; i++) pd += analogReadMilliVolts(GAS_PIN);
-    pinMode(GAS_PIN, INPUT);
-    analogSetPinAttenuation(GAS_PIN, ADC_11db);
-    bool was = present;
-    present = pd / 8 > 40;
-    if (present != was) Serial.printf("Gas sensor %s\n", present ? "connected" : "NOT connected (pin empty)");
+    for (int i = 0; i < 8; i++) pd += analogReadMilliVolts(pin);
+    pinMode(pin, INPUT);
+    analogSetPinAttenuation(pin, ADC_11db);
+    bool was = g.present;
+    g.present = pd / 8 > 40;
+    if (g.present != was) Serial.printf("Gas sensor %u %s\n", c + 1, g.present ? "connected" : "NOT connected (pin empty)");
   }
   uint32_t sum = 0;
-  for (int i = 0; i < 16; i++) sum += analogReadMilliVolts(GAS_PIN);
-  gasMv = present ? (uint16_t)(sum / 16 * GAS_DIVIDER) : 0;
+  for (int i = 0; i < 16; i++) sum += analogReadMilliVolts(pin);
+  uint16_t mv = g.present ? (uint16_t)(sum / 16 * GAS_DIVIDER) : 0;
   uint8_t f = 0;
   if (now < GAS_WARMUP_MS) f |= 1;
-  if (!present || gasMv < 30) f |= 4;                       // sensor not connected
+  if (!g.present || mv < 30) f |= 4;                         // sensor not connected
   // clean-air level: the lowest reading after warm-up, slowly following real drift upwards
-  static float base = 0;
-  if (f & 5) base = 0;
-  else if (base == 0 || gasMv < base) base = gasMv;
-  else base += (gasMv - base) * 0.0005f;                    // ~15 min to follow a slow drift
-  if (!(f & 5) && base > 0 && gasMv >= base + GAS_LOCAL_RISE_MV) f |= 2;
-  if ((f & 2) != (gasFlags & 2) || (!(f & 1) && gasMv > lastReported + GAS_EVENT_STEP_MV)) {
+  if (f & 5) g.base = 0;
+  else if (g.base == 0 || mv < g.base) g.base = mv;
+  else g.base += (mv - g.base) * 0.0005f;                    // ~15 min to follow a slow drift
+  if (!(f & 5) && g.base > 0 && mv >= g.base + GAS_LOCAL_RISE_MV) f |= 2;
+  if ((f & 2) != (gasFlagsX[c] & 2) || (!(f & 1) && mv > g.lastReported + GAS_EVENT_STEP_MV)) {
     statusNow = true;
-    lastReported = gasMv;
+    g.lastReported = mv;
   }
-  if (gasMv + GAS_EVENT_STEP_MV < lastReported) lastReported = gasMv;
-  if ((f & 2) && !(gasFlags & 2)) Serial.printf("GAS HIGH %u mV - local alarm\n", gasMv);
-  gasFlags = f;
+  if (mv + GAS_EVENT_STEP_MV < g.lastReported) g.lastReported = mv;
+  if ((f & 2) && !(gasFlagsX[c] & 2)) Serial.printf("GAS %u HIGH %u mV - local alarm\n", c + 1, mv);
+  gasMvX[c] = mv;
+  gasFlagsX[c] = f;
+}
+
+void readGas(uint32_t now) {
+#if GAS_ENABLED
+  static uint32_t last = 0;
+  if (now - last < 500) return;
+  last = now;
+  for (uint8_t c = 0; c < GAS_CHANNELS && c < 3; c++) readGasChannel(c, now);
+  gasMv = gasMvX[0];
+  gasFlags = gasFlagsX[0];
 #endif
+}
+
+bool anyGasAlarm() {
+  for (uint8_t c = 0; c < GAS_CHANNELS && c < 3; c++) if (gasFlagsX[c] & 2) return true;
+  return false;
 }
 
 // ------------------------- AHT air temperature + humidity -------------
@@ -425,6 +508,33 @@ void adoptAlert(uint32_t id, uint8_t level, const char* target) {
   Serial.printf("ALERT %s id=%lu target=%s\n", level ? "ON" : "CLEARED", (unsigned long)id, alertTarget);
 }
 
+// the evacuation guide at the end of a beacon (or from the hub): adopt it if it is newer
+void lookupMyGuide() {
+  myCode = G_NONE; myDist = 0;
+  for (uint8_t i = 0; i < guideN; i++)
+    if (guideTab[i].rep == REPEATER_NO) { myCode = guideTab[i].code; myDist = guideTab[i].dist; }
+}
+
+void adoptGuide(uint32_t id, uint8_t evac, uint8_t n, const GuideEntry* e) {
+  if (id == guideId) return;
+  guideId = id; guideEvac = evac; guideN = n > GUIDE_MAX ? GUIDE_MAX : n;
+  memcpy(guideTab, e, guideN * sizeof(GuideEntry));
+  lookupMyGuide();
+  beaconNow = true;                     // pass it down the chain right away
+  statusNow = true;
+  Serial.printf("GUIDE %lu: %s, %u repeaters; this one shows code %u, %u m\n", (unsigned long)id,
+                evac ? "EVACUATE" : "normal", guideN, myCode, myDist);
+}
+
+void onGuideBlock(const uint8_t* d, int len) {
+  if (len < (int)sizeof(MsGuideHdr)) return;
+  MsGuideHdr h; memcpy(&h, d, sizeof(h));
+  if (h.tag[0] != 'G' || h.tag[1] != 'D') return;
+  uint8_t n = h.n > GUIDE_MAX ? GUIDE_MAX : h.n;
+  if (len < (int)(sizeof(h) + n * sizeof(GuideEntry))) return;
+  if (h.id > guideId) adoptGuide(h.id, h.evac, n, (const GuideEntry*)(d + sizeof(h)));
+}
+
 void onBeacon(const MsBeacon& b, int8_t rssi, uint32_t now) {
   if (b.hop >= 255) return;                                  // it has no route itself
   lastBeaconHeard = now;
@@ -485,7 +595,22 @@ void queueStatusForHub(const MsStatus& st, const uint8_t* path, uint8_t pathLen)
            repName(st.rep).c_str(), st.hop, st.parent ? repName(st.parent).c_str() : "", st.parentRssi,
            (unsigned long)st.alertId, st.buzzing ? "true" : "false", (unsigned long)st.uptime, st.bodies, st.neighbors,
            st.gasMv, st.gasFlags & 1 ? "true" : "false", st.gasFlags & 2 ? "true" : "false", st.gasFlags & 4 ? "true" : "false");
-  String s = String(js) + pathJson(path, pathLen) + airJson(st.airT, st.airH) + "}";
+  String s = String(js) + pathJson(path, pathLen) + airJson(st.airT, st.airH);
+  // all gas channels (ch 1 repeated, so the hub can treat every channel the same way)
+  s += ",\"gas\":[";
+  const uint16_t mvs[3] = {st.gasMv, st.gas2Mv, st.gas3Mv};
+  const uint8_t  fls[3] = {st.gasFlags, st.gasFlags2, st.gasFlags3};
+  for (int c = 0; c < 3; c++) {
+    if (c && mvs[c] == 0xFFFF) continue;
+    char g[110];
+    snprintf(g, sizeof(g), "%s{\"ch\":%d,\"mv\":%u,\"warm\":%s,\"alarm\":%s,\"missing\":%s}", c ? "," : "", c + 1, mvs[c],
+             fls[c] & 1 ? "true" : "false", fls[c] & 2 ? "true" : "false", fls[c] & 4 ? "true" : "false");
+    s += g;
+  }
+  char x[96];
+  snprintf(x, sizeof(x), "],\"sos\":%s,\"disp\":%s,\"gcode\":%u,\"gid\":%lu}", st.repFlags & 1 ? "true" : "false",
+           st.repFlags & 2 ? "true" : "false", st.guideCode, (unsigned long)st.guideId);
+  s += x;
   for (int i = 0; i < nStatuses; i++)                         // keep only the newest per repeater
     if (hubStatuses[i].indexOf("\"id\":\"" + repName(st.rep) + "\"") >= 0) { hubStatuses[i] = s; return; }
   if (nStatuses < 16) hubStatuses[nStatuses++] = s;
@@ -524,7 +649,8 @@ void onUp(const uint8_t* pl, uint8_t n) {
       MsTelem t; copyTelem(t, inner, innerLen);
       queueTelemetryForHub(t, h.bodyRssi, path, len);
     } else if (h.kind == UP_STATUS && innerLen >= MS_STATUS_V2_LEN) {
-      MsStatus st; st.airT = 0x7FFF; st.airH = 0xFFFF;       // older repeater without the AHT fields
+      MsStatus st = {};                                      // older repeaters send fewer fields
+      st.airT = 0x7FFF; st.airH = 0xFFFF; st.gas2Mv = st.gas3Mv = 0xFFFF;
       memcpy(&st, inner, innerLen < sizeof(st) ? innerLen : sizeof(st));
       queueStatusForHub(st, path, len);
     }
@@ -540,6 +666,10 @@ MsStatus myStatus() {
   st.statusSeq = ++statusSeq; st.bodies = bodiesHeard; st.neighbors = neighborCount(millis());
   st.gasMv = gasMv; st.gasFlags = gasFlags;
   st.airT = airT; st.airH = airH;
+  st.gas2Mv = GAS_CHANNELS >= 2 ? gasMvX[1] : 0xFFFF; st.gasFlags2 = gasFlagsX[1];
+  st.gas3Mv = GAS_CHANNELS >= 3 ? gasMvX[2] : 0xFFFF; st.gasFlags3 = gasFlagsX[2];
+  st.repFlags = (sosActive ? 1 : 0) | (displayOk ? 2 : 0);
+  st.guideCode = myCode; st.guideId = guideId;
   return st;
 }
 
@@ -562,7 +692,10 @@ void handleRadio(uint32_t now) {
     uint8_t type = p.data[3];
     if (type == MS_BEACON && p.len >= sizeof(MsBeacon)) {
       MsBeacon b; memcpy(&b, p.data, sizeof(b));
-      if (b.rep != REPEATER_NO) onBeacon(b, p.rssi, now);
+      if (b.rep != REPEATER_NO) {
+        onBeacon(b, p.rssi, now);
+        if (!IS_GATEWAY && p.len > sizeof(MsBeacon)) onGuideBlock(p.data + sizeof(MsBeacon), p.len - sizeof(MsBeacon));
+      }
     } else if (type == MS_UP) {
       onUp(p.data, p.len);
     } else if (type == MS_TELEM && p.len >= 30) {
@@ -579,7 +712,15 @@ void sendBeacon() {
   b.rep = REPEATER_NO; b.hop = myHop; b.espCh = channel;
   b.alertId = alertId; b.level = alertLevel;
   strncpy(b.target, alertTarget, sizeof(b.target));
-  radioSend(&b, sizeof(b));
+  uint8_t buf[250];
+  size_t n = sizeof(b);
+  memcpy(buf, &b, n);
+  if (guideId) {                                             // + the evacuation guide for the whole chain
+    MsGuideHdr h = {{'G', 'D'}, guideId, guideEvac, guideN};
+    memcpy(buf + n, &h, sizeof(h)); n += sizeof(h);
+    memcpy(buf + n, guideTab, guideN * sizeof(GuideEntry)); n += guideN * sizeof(GuideEntry);
+  }
+  radioSend(buf, n);
 }
 
 // ------------------------- hub (main repeater only) ------------------
@@ -667,10 +808,39 @@ void postToHub() {
   lastHubOk = millis();
   nPackets = 0; nStatuses = 0;
   int a = resp.indexOf("\"alert\"");
-  if (a < 0) return;
-  String al = resp.substring(a);
-  String tgt = jsonStr(al, "\"target\"");
-  adoptAlert(jsonInt(al, "\"id\"", alertId), jsonInt(al, "\"level\"", alertLevel), tgt.c_str());
+  if (a >= 0) {
+    String al = resp.substring(a, resp.indexOf('}', a) + 1);
+    String tgt = jsonStr(al, "\"target\"");
+    adoptAlert(jsonInt(al, "\"id\"", alertId), jsonInt(al, "\"level\"", alertLevel), tgt.c_str());
+  }
+  // evacuation guide: "guide":{"id":123,"evac":1,"g":[[2,1,85],[3,2,40]]}
+  int gpos = resp.indexOf("\"guide\"");
+  if (gpos >= 0) {
+    String gs = resp.substring(gpos);
+    uint32_t id = (uint32_t)jsonInt(gs, "\"id\"", 0);
+    if (id && id != guideId) {
+      uint8_t evac = (uint8_t)jsonInt(gs, "\"evac\"", 0);
+      GuideEntry e[GUIDE_MAX];
+      uint8_t n = 0;
+      int k = gs.indexOf("\"g\"");
+      k = k < 0 ? -1 : gs.indexOf('[', k);
+      if (k >= 0) {
+        long v[3]; int nv = 0, depth = 0; long cur = 0; bool num = false;
+        for (int i = k; i < (int)gs.length() && n < GUIDE_MAX; i++) {
+          char c = gs[i];
+          if (c >= '0' && c <= '9') { cur = cur * 10 + (c - '0'); num = true; continue; }
+          if (num) { if (nv < 3) v[nv++] = cur; cur = 0; num = false; }
+          if (c == '[') depth++;
+          else if (c == ']') {
+            if (depth == 2 && nv == 3) { e[n].rep = v[0]; e[n].code = v[1]; e[n].dist = v[2] > 65535 ? 65535 : v[2]; n++; }
+            nv = 0;
+            if (--depth == 0) break;
+          }
+        }
+      }
+      adoptGuide(id, evac, n, e);
+    }
+  }
 }
 
 // ------------------------- phone test page -----------------------------
@@ -930,6 +1100,221 @@ void buzzerSet(bool on) {
 }
 void beep(uint16_t ms) { buzzerSet(true); delay(ms); buzzerSet(false); }
 
+// ------------------------- LED matrix exit sign (MAX7219, 8 x 32) -----------
+// Own driver (no library): 3 wires, bit-banged. The picture is kept in fb[] - one byte per column,
+// bit 0 = top row - and only sent to the matrix when it changes, so the radio is never held up.
+const Glyph FONT[] = {
+  {'0', 5, {0x3E, 0x51, 0x49, 0x45, 0x3E}},
+  {'1', 5, {0x00, 0x42, 0x7F, 0x40, 0x00}},
+  {'2', 5, {0x42, 0x61, 0x51, 0x49, 0x46}},
+  {'3', 5, {0x21, 0x41, 0x45, 0x4B, 0x31}},
+  {'4', 5, {0x18, 0x14, 0x12, 0x7F, 0x10}},
+  {'5', 5, {0x27, 0x45, 0x45, 0x45, 0x39}},
+  {'6', 5, {0x3C, 0x4A, 0x49, 0x49, 0x30}},
+  {'7', 5, {0x01, 0x71, 0x09, 0x05, 0x03}},
+  {'8', 5, {0x36, 0x49, 0x49, 0x49, 0x36}},
+  {'9', 5, {0x06, 0x49, 0x49, 0x29, 0x1E}},
+  {'A', 5, {0x7E, 0x09, 0x09, 0x09, 0x7E}},
+  {'B', 5, {0x7F, 0x49, 0x49, 0x49, 0x36}},
+  {'C', 5, {0x3E, 0x41, 0x41, 0x41, 0x22}},
+  {'D', 5, {0x7F, 0x41, 0x41, 0x22, 0x1C}},
+  {'E', 5, {0x7F, 0x49, 0x49, 0x49, 0x41}},
+  {'F', 5, {0x7F, 0x09, 0x09, 0x09, 0x01}},
+  {'G', 5, {0x3E, 0x41, 0x49, 0x49, 0x7A}},
+  {'H', 5, {0x7F, 0x08, 0x08, 0x08, 0x7F}},
+  {'I', 5, {0x00, 0x41, 0x7F, 0x41, 0x00}},
+  {'J', 5, {0x20, 0x40, 0x41, 0x3F, 0x01}},
+  {'K', 5, {0x7F, 0x08, 0x14, 0x22, 0x41}},
+  {'L', 5, {0x7F, 0x40, 0x40, 0x40, 0x40}},
+  {'M', 5, {0x7F, 0x02, 0x0C, 0x02, 0x7F}},
+  {'N', 5, {0x7F, 0x04, 0x08, 0x10, 0x7F}},
+  {'O', 5, {0x3E, 0x41, 0x41, 0x41, 0x3E}},
+  {'P', 5, {0x7F, 0x09, 0x09, 0x09, 0x06}},
+  {'Q', 5, {0x3E, 0x41, 0x51, 0x21, 0x5E}},
+  {'R', 5, {0x7F, 0x09, 0x19, 0x29, 0x46}},
+  {'S', 5, {0x46, 0x49, 0x49, 0x49, 0x31}},
+  {'T', 5, {0x01, 0x01, 0x7F, 0x01, 0x01}},
+  {'U', 5, {0x3F, 0x40, 0x40, 0x40, 0x3F}},
+  {'V', 5, {0x1F, 0x20, 0x40, 0x20, 0x1F}},
+  {'W', 5, {0x3F, 0x40, 0x38, 0x40, 0x3F}},
+  {'X', 5, {0x63, 0x14, 0x08, 0x14, 0x63}},
+  {'Y', 5, {0x03, 0x04, 0x78, 0x04, 0x03}},
+  {'Z', 5, {0x61, 0x51, 0x49, 0x45, 0x43}},
+  {'m', 5, {0x7C, 0x04, 0x78, 0x04, 0x78}},
+  {'k', 5, {0x7F, 0x10, 0x28, 0x44, 0x00}},
+  {'%', 5, {0x23, 0x13, 0x08, 0x64, 0x62}},
+  {'!', 1, {0x5F, 0x00, 0x00, 0x00, 0x00}},
+  {'.', 1, {0x40, 0x00, 0x00, 0x00, 0x00}},
+  {'-', 3, {0x08, 0x08, 0x08, 0x00, 0x00}},
+  {':', 1, {0x22, 0x00, 0x00, 0x00, 0x00}},
+  {' ', 2, {0x00, 0x00, 0x00, 0x00, 0x00}},
+  {'>', 4, {0x41, 0x22, 0x14, 0x08, 0x00}},
+  {'<', 4, {0x08, 0x14, 0x22, 0x41, 0x00}},
+  {'*', 5, {0x2A, 0x1C, 0x3E, 0x1C, 0x2A}},
+
+};
+const uint8_t ARROW_L[8] = {0x08, 0x1C, 0x3E, 0x7F, 0x1C, 0x1C, 0x1C, 0x1C};   // left-pointing arrow, 8 columns
+const uint8_t ARROW_U[8] = {0x08, 0x0C, 0x0E, 0xFF, 0xFF, 0x0E, 0x0C, 0x08};   // up-pointing arrow
+const uint8_t CROSS[8]   = {0x81, 0x42, 0x24, 0x18, 0x18, 0x24, 0x42, 0x81};
+#define MX_COLS (MATRIX_MODULES * 8)
+uint8_t fb[MX_COLS], fbSent[MX_COLS];
+uint8_t mxBright = 255;
+
+void mxSendAll(uint8_t reg, const uint8_t* perModule) {     // perModule[0] = left-most block
+#if DISPLAY_ENABLED
+  digitalWrite(MX_CS, LOW);
+  for (int i = 0; i < MATRIX_MODULES; i++) {
+    int m = MATRIX_REVERSE ? MATRIX_MODULES - 1 - i : i;      // the first block sent ends up furthest from DIN
+    shiftOut(MX_DIN, MX_CLK, MSBFIRST, reg);
+    shiftOut(MX_DIN, MX_CLK, MSBFIRST, perModule[m]);
+  }
+  digitalWrite(MX_CS, HIGH);
+#endif
+}
+void mxReg(uint8_t reg, uint8_t v) { uint8_t d[MATRIX_MODULES]; memset(d, v, sizeof(d)); mxSendAll(reg, d); }
+
+void mxBegin() {
+#if DISPLAY_ENABLED
+  pinMode(MX_DIN, OUTPUT); pinMode(MX_CLK, OUTPUT); pinMode(MX_CS, OUTPUT);
+  digitalWrite(MX_CS, HIGH);
+  mxReg(0x0F, 0);      // display test off
+  mxReg(0x09, 0);      // no BCD decode
+  mxReg(0x0B, 7);      // scan all 8 rows
+  mxReg(0x0A, 2);      // brightness 0..15
+  mxReg(0x0C, 1);      // wake up
+  memset(fbSent, 0xAA, sizeof(fbSent));
+  displayOk = true;    // the MAX7219 cannot be read back; "fitted" = enabled in the config
+#endif
+}
+
+void mxShow(uint8_t bright) {                // send fb[] if anything changed
+#if DISPLAY_ENABLED
+  if (bright != mxBright) { mxBright = bright; mxReg(0x0A, bright); }
+  if (!memcmp(fb, fbSent, sizeof(fb))) return;
+  memcpy(fbSent, fb, sizeof(fb));
+  uint8_t d[MATRIX_MODULES];
+  for (int r = 0; r < 8; r++) {              // FC-16: register = row;  generic: register = column
+    for (int m = 0; m < MATRIX_MODULES; m++) {
+      uint8_t v = 0;
+      for (int c = 0; c < 8; c++) {
+        int col = m * 8 + c;
+        int src = MATRIX_FLIP_X ? MX_COLS - 1 - col : col;
+#if MATRIX_TYPE == 0
+        int row = MATRIX_FLIP_Y ? 7 - r : r;
+        if (fb[src] >> row & 1) v |= 0x80 >> c;
+#else
+        uint8_t colBits = fb[m * 8 + (MATRIX_FLIP_X ? 7 - r : r)];
+        int bit = MATRIX_FLIP_Y ? 7 - c : c;
+        if (colBits >> bit & 1) v |= 1 << c;
+#endif
+      }
+      d[m] = v;
+    }
+    mxSendAll(r + 1, d);
+  }
+#endif
+}
+
+const Glyph* glyph(char c) {
+  for (const Glyph& g : FONT) if (g.c == c) return &g;
+  return &FONT[0];
+}
+int textWidth(const char* t) { int w = 0; for (; *t; t++) w += glyph(*t)->w + 1; return w ? w - 1 : 0; }
+void drawText(int x, const char* t) {
+  for (; *t; t++) {
+    const Glyph* g = glyph(*t);
+    for (int i = 0; i < g->w; i++) if (x + i >= 0 && x + i < MX_COLS) fb[x + i] |= g->col[i];
+    x += g->w + 1;
+  }
+}
+void drawCentered(const char* t) { drawText((MX_COLS - textWidth(t)) / 2, t); }
+void drawIcon(int x, const uint8_t* ic, bool mirror) {
+  for (int i = 0; i < 8; i++) if (x + i >= 0 && x + i < MX_COLS) fb[x + i] |= ic[mirror ? 7 - i : i];
+}
+void distText(char* b, size_t n, uint16_t m) {
+  if (m >= 1000) snprintf(b, n, "%u.%uk", m / 1000, (m % 1000) / 100); else snprintf(b, n, "%um", m);
+}
+
+// what the sign shows, most important first
+void renderDisplay(uint32_t now) {
+#if DISPLAY_ENABLED
+  static uint32_t last = 0;
+  if (now - last < 60) return;
+  last = now;
+  memset(fb, 0, sizeof(fb));
+  bool blink = (now / 400) % 2;
+  uint8_t bright = 15;
+  uint8_t dir = myCode & 0x0F;
+  char b[12];
+  if (sosActive) {
+    if (blink) drawCentered("SOS");
+  } else if (guideEvac && dir != G_NONE) {
+    bool phaseB = (now / 1500) % 2;                          // 1.5 s arrow + distance, 1.5 s animation
+    if (dir == G_HERE) {
+      if (blink || phaseB) drawCentered("EXIT");
+    } else if (dir == G_NOWAY) {
+      if (phaseB) drawCentered("NO GO"); else { drawIcon(0, CROSS, false); drawIcon(MX_COLS - 8, CROSS, false); drawText(11, "!!"); }
+    } else if ((myCode & G_DANGER) && phaseB && blink) {
+      drawCentered("DANGR");
+    } else if (!phaseB) {
+      distText(b, sizeof(b), myDist);
+      if (dir == G_LEFT)  { drawIcon(0, ARROW_L, false); drawText(MX_COLS - textWidth(b), b); }
+      if (dir == G_RIGHT) { drawText(0, b); drawIcon(MX_COLS - 8, ARROW_L, true); }
+      if (dir == G_UP)    { drawIcon(0, ARROW_U, false); drawText(MX_COLS - textWidth(b), b); }
+    } else {                                                 // running chevrons in the walking direction
+      int sh = (now / 80) % 8;
+      for (int x = -8; x < MX_COLS + 8; x += 8) {
+        if (dir == G_LEFT)  drawText(x - sh + 8, "<");
+        if (dir == G_RIGHT) drawText(x + sh, ">");
+        if (dir == G_UP)    drawIcon(x + 0, ARROW_U, false);
+      }
+      if (dir == G_UP && (now / 200) % 2) memset(fb, 0, sizeof(fb));
+    }
+  } else if (anyGasAlarm()) {
+    if (blink) drawCentered("GAS!");
+  } else if (alertLevel) {
+    if (blink) drawCentered(guideEvac ? "EVAC" : "ALERT");
+  } else {                                                   // normal: quiet, dim, cycles name / air
+    bright = 1;
+    int phase = (now / 3000) % 3;
+    if (phase == 1 && airT != 0x7FFF) snprintf(b, sizeof(b), "%dC", (airT + 50) / 100);
+    else if (phase == 2 && airH != 0xFFFF) snprintf(b, sizeof(b), "%u%%", (airH + 50) / 100);
+    else snprintf(b, sizeof(b), "R%02u", REPEATER_NO);
+    drawCentered(b);
+    if (!IS_GATEWAY && myHop == 255 && blink) fb[MX_COLS - 1] = 0x80;   // dot = no route to the main repeater yet
+  }
+  mxShow(bright);
+#endif
+}
+
+void displayTest() {                         // Serial 'd': shows every picture once
+#if DISPLAY_ENABLED
+  const char* words[] = {"MINE", "SAFE", "R" , "EXIT", "GAS!", "SOS"};
+  for (const char* w : words) { memset(fb, 0, sizeof(fb)); drawCentered(w); mxShow(15); delay(600); }
+  memset(fb, 0, sizeof(fb)); drawIcon(0, ARROW_L, false); drawText(14, "85m"); mxShow(15); delay(900);
+  memset(fb, 0, sizeof(fb)); drawText(0, "120m"); drawIcon(MX_COLS - 8, ARROW_L, true); mxShow(15); delay(900);
+  memset(fb, 0, sizeof(fb)); drawIcon(0, ARROW_U, false); drawText(14, "40m"); mxShow(15); delay(900);
+  memset(fb, 0xFF, sizeof(fb)); mxShow(15); delay(600);
+#endif
+}
+
+// ------------------------- SOS button --------------------------------
+void sosUpdate(uint32_t now) {
+#if SOS_ENABLED
+  static uint32_t downAt = 0;
+  static bool fired = false;
+  bool down = digitalRead(SOS_PIN) == LOW;
+  if (down && !downAt) { downAt = now | 1; fired = false; }
+  if (!down) downAt = 0;
+  if (down && !fired && now - downAt > 1500) {               // hold 1.5 s: no accidental bumps
+    fired = true;
+    sosActive = !sosActive;
+    statusNow = true;
+    Serial.printf("SOS at this repeater %s\n", sosActive ? "ON" : "off");
+  }
+#endif
+}
+
 // ------------------------- setup / loop ------------------------------
 void setup() {
 #if defined(ARDUINO_XIAO_ESP32C6)
@@ -957,6 +1342,18 @@ void setup() {
   Serial.printf("AHT air sensor on SDA GPIO%d / SCL GPIO%d: %s\n", AHT_SDA, AHT_SCL,
                 ahtInit() ? "found" : "NOT found (check wiring) - will keep looking");
 #endif
+#if GAS_ENABLED
+  for (uint8_t c = 1; c < GAS_CHANNELS && c < 3; c++) analogSetPinAttenuation(GAS_PINS[c], ADC_11db);
+#endif
+#if SOS_ENABLED
+  pinMode(SOS_PIN, INPUT_PULLUP);
+#endif
+#if DISPLAY_ENABLED
+  mxBegin();
+  memset(fb, 0, sizeof(fb)); { char b[8]; snprintf(b, sizeof(b), "R%02u", REPEATER_NO); drawCentered(b); } mxShow(8);
+  Serial.printf("LED matrix: DIN GPIO%d, CS GPIO%d, CLK GPIO%d (type %d) - type d + Enter for a display test\n",
+                MX_DIN, MX_CS, MX_CLK, MATRIX_TYPE);
+#endif
   Serial.printf("Buzzer test on GPIO%d (%s%s): 3 beeps\n", BUZZER_PIN, BUZZER_PASSIVE ? "passive, tone" : "active",
                 BUZZER_ACTIVE_LOW ? ", active-LOW" : "");
   for (int i = 0; i < 3; i++) { beep(150); delay(150); }
@@ -979,8 +1376,8 @@ void setup() {
     Serial.printf("\n%s tunnel repeater - looking for the chain\n", repName(REPEATER_NO).c_str());
   }
   esp_wifi_set_ps(WIFI_PS_NONE);          // keep the receiver awake
-  Serial.printf("ESP-NOW %s   buzzer GPIO%d   gas %s\n", radioBegin() ? "OK" : "FAILED", BUZZER_PIN,
-                GAS_ENABLED ? ("GPIO" + String(GAS_PIN) + " (warming up 60 s)").c_str() : "off");
+  Serial.printf("ESP-NOW %s   buzzer GPIO%d   gas %s (%d channel%s)\n", radioBegin() ? "OK" : "FAILED", BUZZER_PIN,
+                GAS_ENABLED ? ("GPIO" + String(GAS_PIN) + " (warming up 60 s)").c_str() : "off", GAS_CHANNELS, GAS_CHANNELS > 1 ? "s" : "");
 #if TEST_PAGE
   testPageBegin();
   if (IS_GATEWAY && WiFi.status() == WL_CONNECTED)
@@ -996,6 +1393,8 @@ void loop() {
   handleRadio(now);
   readGas(now);
   readAir(now);
+  sosUpdate(now);
+  renderDisplay(now);
   channelSearch(now);
   if (now - lastRoute > 1000) { lastRoute = now; recomputeRoute(now); }
 
@@ -1033,13 +1432,19 @@ void loop() {
   while (Serial.available()) {
     char c = Serial.read();
     if (c == 'b' || c == 'B') { testUntil = now + 1000; Serial.println("Buzzer test 1 s"); }
+    if (c == 'd' || c == 'D') { Serial.println("Display test"); displayTest(); }
+    if (c == 's' || c == 'S') { sosActive = !sosActive; statusNow = true; Serial.printf("SOS %s\n", sosActive ? "ON" : "off"); }
     if (c == 'a' || c == 'A') {
       if (airT == 0x7FFF) Serial.println("AHT: no reading (sensor not found)");
       else Serial.printf("AHT: air %.2f C, humidity %.2f %%RH\n", airT / 100.0f, airH / 100.0f);
     }
   }
-  // buzzer: 300 ms on / 200 ms off while the alert is active
-  bool buzz = (alertLevel && (now % 500) < 300) || ((gasFlags & 2) && (now % 200) < 100) || now < testUntil;
+  // buzzer patterns: evacuation = 3 short beeps every 1.5 s, alert = 300 ms on / 200 ms off,
+  // local gas alarm = fast beeping, SOS at this repeater = short chirp every 2 s (helps rescuers find it)
+  uint32_t e = now % 1500;
+  bool evacBuzz = guideEvac && alertLevel && e < 600 && (e % 200) < 120;
+  bool buzz = now < testUntil || (anyGasAlarm() && (now % 200) < 100) || evacBuzz
+              || (!guideEvac && alertLevel && (now % 500) < 300) || (sosActive && (now % 2000) < 80);
   buzzerSet(buzz);
   delay(2);
 }

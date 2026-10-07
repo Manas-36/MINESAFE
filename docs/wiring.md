@@ -36,6 +36,15 @@ The green MAX3010x board pulls its I2C lines to 1.8 V; sharing the bus with the 
 | **AHT SDA** | GPIO8 | D4 (GPIO22) |
 | **AHT SCL** | GPIO9 | D5 (GPIO23) |
 | External 2.4 GHz antenna (u.FL → SMA pigtail) | — | u.FL, `USE_EXTERNAL_ANTENNA 1` |
+| **v3.3 LED matrix (MAX7219 FC-16, 8×32) VCC / GND** | 5V / GND | 5V / GND |
+| LED matrix DIN | GPIO11 | D9 (GPIO20) |
+| LED matrix CS | GPIO10 | D3 (GPIO21) |
+| LED matrix CLK | GPIO12 | D8 (GPIO19) |
+| Gas sensor 2 AO → 10k/20k divider (`GAS_CHANNELS 2`) | GPIO6 | D0 (GPIO0) |
+| Gas sensor 3 AO → 10k/20k divider (`GAS_CHANNELS 3`) | GPIO7 | D1 (GPIO1) |
+| SOS button (→ GND, hold 1.5 s) | GPIO13 | D6 (GPIO16) |
+
+**Exit sign (v3.3).** The matrix shows the repeater number and the air reading (dim) in normal times, `ALERT` / `GAS!` / `SOS` when needed, and during an evacuation an arrow + distance (◀ 85m) alternating with running chevrons; `EXIT` at the exit, `NO GO` if no way out is known, `DANGR` when the repeater is inside the danger zone. The buzzer stays: 3 short beeps every 1.5 s during an evacuation. Serial `d` = display test. If the text is mirrored / upside down / in the wrong blocks, change `MATRIX_FLIP_X`, `MATRIX_FLIP_Y`, `MATRIX_REVERSE` or `MATRIX_TYPE`. Each repeater's arrow direction is set on the admin Map tab (→ field, ⇄ to flip).
 
 The 10 k / 20 k divider keeps the 0–5 V MQ output safe for the 3.3 V pin; the code multiplies by 1.5 to undo it.
 

@@ -37,6 +37,7 @@ import json
 import math
 import os
 import threading
+import re
 import time
 import uuid
 from collections import deque
@@ -681,6 +682,29 @@ def telemetry():
                 g.append([round(now, 1), x["gas_mv"]])
                 del g[:-600]
                 gas_sample(sid, x, now)
+            for gch in st.get("gas", []) or []:            # v3.3 repeaters: every channel (1 is repeated)
+                try:
+                    ch = int(gch.get("ch", 0))
+                except (TypeError, ValueError):
+                    continue
+                if ch not in (2, 3):
+                    continue
+                gx = x.setdefault("gas_x", {}).setdefault(str(ch), {})
+                gx.update(gas_mv=int(gch.get("mv", 0)), gas_warm=bool(gch.get("warm")),
+                          gas_local=bool(gch.get("alarm")), gas_missing=bool(gch.get("missing")))
+                hh = gx.setdefault("gas_hist", [])
+                hh.append([round(now, 1), gx["gas_mv"]])
+                del hh[:-600]
+                gas_sample(sid, gx, now, ch)
+            if isinstance(st.get("direct"), dict):          # sensors that report the gas value themselves
+                x["direct"] = {str(k)[:8]: float(v) for k, v in st["direct"].items() if isinstance(v, (int, float))}
+            if "sos" in st:
+                was = x.get("sos", False)
+                x.update(sos=bool(st.get("sos")), disp=bool(st.get("disp")), gcode=st.get("gcode"), gid=st.get("gid"))
+                if x["sos"] != was:
+                    incidents.insert(0, {"t": now, "time": clock(now), "body_id": sid, "name": f"SOS button at {sid}",
+                                         "from": "SAFE" if x["sos"] else "DANGER", "to": "DANGER" if x["sos"] else "SAFE",
+                                         "why": "SOS button held at the repeater" if x["sos"] else "SOS at the repeater switched off"})
             if "air_t" in st:                       # AHT sensor (V3.1 repeaters); null = not connected
                 at, ah = st.get("air_t"), st.get("air_h")
                 ok = isinstance(at, (int, float)) and isinstance(ah, (int, float)) and -40 < at < 85 and 0 <= ah <= 100
@@ -698,7 +722,11 @@ def telemetry():
                 x.update(parent=str(st.get("parent", "")).upper(), via_mesh=True)
         for p in pk:
             ingest(p, rep, now)
-        return jsonify(ok=True, alert=alert_payload())
+        out = {"ok": True, "alert": alert_payload()}
+        if EVAC["guide_id"]:
+            out["guide"] = {"id": EVAC["guide_id"], "evac": 1 if EVAC["active"] else 0,
+                            "g": [[n, c, d] for n, c, d in EVAC["guide"]]}
+        return jsonify(out)
 
 
 # =====================================================================
@@ -734,13 +762,43 @@ def settings():
         return jsonify(ok=False, error="Pick a level between 100 and 5000 mV"), 400
     with lock:
         LIMITS["gas_alarm_mv"] = mv
-        save("settings.json", {"gas_alarm_mv": mv})
+        save("settings.json", LIMITS)
     return jsonify(ok=True, gas_alarm_mv=mv)
+
+
+@app.post("/api/limits")
+def set_limits():
+    """Limits tab: gas limits, body / heat limits, evacuation settings - saved on this laptop."""
+    d = request.get_json(force=True, silent=True) or {}
+    with lock:
+        for k, v in (d.get("gas") or {}).items():
+            if k in GAS_LIMITS and isinstance(v, dict):
+                g = GAS_LIMITS[k]
+                hi = 1e6 if g["unit"] == "ppm" else 100
+                w, dg = _num(v.get("warn"), 0, hi, g["warn"]), _num(v.get("danger"), 0, hi, g["danger"])
+                if (dg < w) if not g.get("low") else (dg > w):
+                    return jsonify(ok=False, error=f"{g['name']}: the danger level must be past the warning level"), 400
+                g.update(warn=w, danger=dg, alarm=bool(v.get("alarm", g["alarm"])))
+        if d.get("gas_reset"):
+            for k, v in GAS_LIMITS_DEFAULT.items():
+                GAS_LIMITS[k].update(warn=v["warn"], danger=v["danger"], alarm=v["alarm"])
+        save("gas_limits.json", {k: {x: g[x] for x in ("warn", "danger", "alarm")} for k, g in GAS_LIMITS.items()})
+        for k, v in (d.get("limits") or {}).items():
+            if k in LIMITS:
+                LIMITS[k] = type(LIMITS[k])(_num(v, -1000, 100000, LIMITS[k]))
+        save("settings.json", LIMITS)
+        if "evac" in d:
+            EVAC_CFG["auto_gas"] = bool(d["evac"].get("auto_gas", EVAC_CFG["auto_gas"]))
+            EVAC_CFG["radius_m"] = _num(d["evac"].get("radius_m"), 2, 500, EVAC_CFG["radius_m"])
+            save("evac.json", EVAC_CFG)
+    return jsonify(ok=True)
 
 
 @app.post("/api/alert/clear")
 def clear_alert():
     with lock:
+        if EVAC["active"]:                        # clearing the alert also ends the evacuation
+            stop_evacuation()
         for gs in gas_state.values():
             gs["last_alert"] = time.time()        # gas still high -> alert again after GAS_REALERT_S
         if alert["level"]:
@@ -812,23 +870,36 @@ candidate = {}                          # body_id -> (status, first time seen)
 
 
 def check_gas(now):
-    """Raise the alert for everyone when any repeater's gas reading crosses the limit."""
-    limit = LIMITS["gas_alarm_mv"]
+    """Raise the alert for everyone when any repeater's gas reading crosses a danger limit -
+    and, if switched on, start an evacuation with that repeater's area as the danger zone."""
     for rid, r in repeaters.items():
         online = now - r["last_seen"] < LIMITS["mesh_repeater_offline_s"]
-        if "gas_mv" not in r or r.get("gas_warm") or r.get("gas_missing") or not online:
+        if not gas_channels(r) and not r.get("direct"):
             continue
-        ga = gas_analysis(rid, r)
-        bad = [g for g in (ga or {}).get("gases", []) if g["level"] == 2 and g["main"]]   # only the gases this sensor is made for
-        high = r["gas_mv"] >= limit or r.get("gas_local") or bool(bad)
-        what = ", ".join(f"{g['key']} ~{g['ppm']:.0f} ppm" for g in bad) or f"{r['gas_mv']} mV"
+        if not online or all(d.get("gas_warm") or d.get("gas_missing") for _, d in gas_channels(r)) and not r.get("direct"):
+            continue
+        lv, why, top = gas_level(rid, r)
+        high = lv == 2
+        what = ", ".join(why) or f"{top} mV"
         gs = gas_state.setdefault(rid, {"high": False, "last_alert": 0})
         if high != gs["high"]:
             incidents.insert(0, {"t": now, "time": clock(now), "body_id": rid, "name": f"Gas at {rid}",
                                  "from": "SAFE" if high else "DANGER", "to": "DANGER" if high else "SAFE",
-                                 "why": f"Gas {what} (sensor {r['gas_mv']} mV)" if high else f"Gas back to normal ({r['gas_mv']} mV)"})
+                                 "why": f"Gas {what}" if high else "Gas back to normal"})
             gs["high"] = high
-        if high and not alert["level"] and now - gs["last_alert"] > GAS_REALERT_S:
+        if not high:
+            continue
+        p = rep_pos(rid)
+        if EVAC_CFG["auto_gas"] and p is not None:
+            if not any(h.get("rid") == rid for h in EVAC["hazards"]):
+                EVAC["hazards"].append({"x": p[0], "y": p[1], "r": EVAC_CFG["radius_m"], "why": f"Gas at {rid}: {what}",
+                                        "rid": rid, "t": now})
+                if EVAC["active"]:
+                    alert_log.insert(0, {"time": clock(now), "action": "DANGER ZONE", "target": "", "msg": f"gas at {rid} added"})
+            if not EVAC["active"] and now - gs["last_alert"] > GAS_REALERT_S:
+                gs["last_alert"] = now
+                start_evacuation(f"AUTO: gas {what} at {rid}", "auto", now)
+        elif not alert["level"] and now - gs["last_alert"] > GAS_REALERT_S:
             gs["last_alert"] = now
             msg = f"AUTO: gas {what} at {rid}"
             alert.update(id=next_alert_id(), level=1, target="*", msg=msg, time=now)
@@ -867,6 +938,7 @@ def watchdog():
                 candidate.pop(bid, None)
             check_gas(now)
             check_air(now)
+            update_guide(now)
         time.sleep(1)
 
 
@@ -888,6 +960,7 @@ MAP_DEFAULT = {
     "step_m": 0.7,                           # default step length
     "snap_rssi": -55,                        # body hears a repeater this strongly -> it is next to it
     "range_m": 40.0,                         # a body can't be further than this from its nearest repeater
+    "exits": [],                             # [{"name": "Main shaft", "x": 0.0, "y": 0.0}]
 }
 mapcfg = {**MAP_DEFAULT, **load("map.json", {})}
 positions = {}                               # body_id -> position state
@@ -1071,8 +1144,12 @@ def set_map():
             mapcfg["start_dir"] = None if d["start_dir"] in (None, "") else _num(d["start_dir"], -360, 720, 0) % 360
         if "repeaters" in d and isinstance(d["repeaters"], dict):
             mapcfg["repeaters"] = {str(k).upper()[:16]: {"x": _num(v.get("x"), -1e5, 1e5, 0), "y": _num(v.get("y"), -1e5, 1e5, 0),
-                                                         "z": _num(v.get("z"), -5000, 5000, 0)}
+                                                         "z": _num(v.get("z"), -5000, 5000, 0),
+                                                         "face": None if v.get("face") in (None, "") else _num(v.get("face"), -720, 720, 90) % 360}
                                    for k, v in d["repeaters"].items() if isinstance(v, dict)}
+        if "exits" in d and isinstance(d["exits"], list):
+            mapcfg["exits"] = [{"name": str(e.get("name") or f"Exit {i + 1}")[:24], "x": _num(e.get("x"), -1e5, 1e5, 0),
+                                "y": _num(e.get("y"), -1e5, 1e5, 0)} for i, e in enumerate(d["exits"][:20]) if isinstance(e, dict)]
         if "tunnels" in d and isinstance(d["tunnels"], list):
             mapcfg["tunnels"] = [[[_num(p[0], -1e5, 1e5, 0), _num(p[1], -1e5, 1e5, 0)] for p in line if len(p) >= 2]
                                  for line in d["tunnels"][:500] if isinstance(line, list) and len(line) >= 2]
@@ -1125,6 +1202,294 @@ def reset_position():
         else:
             positions.pop(bid, None)
     return jsonify(ok=True)
+
+
+
+# =====================================================================
+#  Exits, danger zones and evacuation routes
+#  The tunnel centre lines become a network (junctions found automatically). From every exit
+#  the hub works out the shortest way out for every point of the network (Dijkstra), with tunnels
+#  that pass through a danger zone made 1000x "longer" - so routes go around a gas / fire area if
+#  there is another way, and straight out of it if there is not.
+#  Every repeater on the map gets its own instruction for its LED exit sign (arrow + distance),
+#  and every worker gets a route drawn on the map.
+# =====================================================================
+EVAC_CFG = {"auto_gas": True, "radius_m": 25.0, **load("evac.json", {})}
+EVAC = {"active": False, "hazards": [], "since": None, "by": "", "msg": "", "guide_id": 0, "guide": [], "guide_key": None}
+G_NONE, G_LEFT, G_RIGHT, G_UP, G_HERE, G_NOWAY, G_DANGER = 0, 1, 2, 3, 4, 5, 0x10
+_graph_cache = {"key": None}
+
+
+def rep_number(rid):
+    m = re.search(r"(\d+)$", rid or "")
+    return int(m.group(1)) if m else None
+
+
+def seg_point_dist(px, py, a, b):
+    return project(px, py, a, b)[2]
+
+
+def in_hazard(x, y):
+    return any(math.hypot(x - h["x"], y - h["y"]) <= h["r"] for h in EVAC["hazards"])
+
+
+def build_network():
+    """Tunnel centre lines -> nodes + edges. Splits lines where they cross or where one ends on
+    another (T-junction), and at every exit, so an exit is a node of its own."""
+    segs = tunnel_segments()
+    exits = mapcfg.get("exits", [])
+    cuts = {i: [0.0, 1.0] for i in range(len(segs))}
+    TOL = 1.0
+    for i, (a, b) in enumerate(segs):
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        L2 = dx * dx + dy * dy or 1e-9
+        pts = [p for j, sg in enumerate(segs) if j != i for p in sg] + [[e["x"], e["y"]] for e in exits]
+        for p in pts:                                   # end of another line (or an exit) lying on this one
+            t = ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L2
+            if 0 < t < 1 and seg_point_dist(p[0], p[1], a, b) < TOL:
+                cuts[i].append(t)
+        for j, (c, d) in enumerate(segs):               # proper crossing of two lines
+            if j <= i:
+                continue
+            ex, ey = d[0] - c[0], d[1] - c[1]
+            den = dx * ey - dy * ex
+            if abs(den) < 1e-9:
+                continue
+            t = ((c[0] - a[0]) * ey - (c[1] - a[1]) * ex) / den
+            u = ((c[0] - a[0]) * dy - (c[1] - a[1]) * dx) / den
+            if 0 < t < 1 and 0 < u < 1:
+                cuts[i].append(t)
+                cuts[j].append(u)
+    nodes, adj = [], {}
+
+    def node(x, y):
+        for k, q in enumerate(nodes):
+            if math.hypot(x - q[0], y - q[1]) < 0.75:
+                return k
+        nodes.append((x, y))
+        return len(nodes) - 1
+    edges = []
+    for i, (a, b) in enumerate(segs):
+        ts = sorted(set(round(t, 6) for t in cuts[i]))
+        ids = [node(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t) for t in ts]
+        for u, v in zip(ids, ids[1:]):
+            if u != v and v not in [w for w, _ in adj.get(u, [])]:
+                L = math.hypot(nodes[u][0] - nodes[v][0], nodes[u][1] - nodes[v][1])
+                adj.setdefault(u, []).append((v, L))
+                adj.setdefault(v, []).append((u, L))
+                edges.append((u, v))
+    return nodes, adj, edges
+
+
+def edge_penalty(p, q):
+    for h in EVAC["hazards"]:
+        if seg_point_dist(h["x"], h["y"], p, q) <= h["r"]:
+            return 1000.0
+    return 1.0
+
+
+def route_network():
+    """Dijkstra from all exits at once. Cached until the map, exits or danger zones change."""
+    key = json.dumps([mapcfg.get("rev"), mapcfg.get("tunnels"), mapcfg.get("exits"), EVAC["hazards"]], default=str)
+    if _graph_cache["key"] == key:
+        return _graph_cache
+    nodes, adj, edges = build_network()
+    import heapq
+    cost, true_len, nxt, exit_of = {}, {}, {}, {}
+    heap = []
+    for e in mapcfg.get("exits", []):
+        if not nodes:
+            break
+        k = min(range(len(nodes)), key=lambda n: math.hypot(nodes[n][0] - e["x"], nodes[n][1] - e["y"]))
+        if math.hypot(nodes[k][0] - e["x"], nodes[k][1] - e["y"]) > 15:   # exit not on a tunnel
+            continue
+        cost[k], true_len[k], nxt[k], exit_of[k] = 0.0, 0.0, None, e["name"]
+        heapq.heappush(heap, (0.0, k))
+    done = set()
+    while heap:
+        c, u = heapq.heappop(heap)
+        if u in done:
+            continue
+        done.add(u)
+        for v, L in adj.get(u, []):
+            w = L * edge_penalty(nodes[u], nodes[v])
+            if v not in cost or c + w < cost[v] - 1e-9:
+                cost[v], true_len[v], nxt[v], exit_of[v] = c + w, true_len[u] + L, u, exit_of[u]
+                heapq.heappush(heap, (cost[v], v))
+    _graph_cache.update(key=key, nodes=nodes, adj=adj, edges=edges, cost=cost, true_len=true_len, nxt=nxt, exit_of=exit_of)
+    return _graph_cache
+
+
+def route_from(x, y):
+    """Best way out from a point: {exit, dist (m), path [[x,y],...], hazard (passes a danger zone)} or None."""
+    exits = mapcfg.get("exits", [])
+    if not exits:
+        return None
+    G = route_network()
+    nodes, cost = G["nodes"], G["cost"]
+    if not G["edges"] or not cost:                       # no tunnels drawn: straight line to the nearest exit
+        e = min(exits, key=lambda e: math.hypot(x - e["x"], y - e["y"]))
+        return {"exit": e["name"], "dist": round(math.hypot(x - e["x"], y - e["y"])),
+                "path": [[round(x, 2), round(y, 2)], [e["x"], e["y"]]], "hazard": in_hazard(x, y)}
+    best = None
+    dmin = min(project(x, y, nodes[u], nodes[v])[2] for u, v in G["edges"])
+    for u, v in G["edges"]:
+        p, q = nodes[u], nodes[v]
+        px, py, d, _ = project(x, y, p, q)
+        if d > dmin + 2.0:                                  # only the tunnel(s) the point is actually in
+            continue
+        L = math.hypot(q[0] - p[0], q[1] - p[1]) or 1e-9
+        t = math.hypot(px - p[0], py - p[1]) / L
+        pen = edge_penalty(p, q)
+        for n, part in ((u, t * L), (v, (1 - t) * L)):
+            if n not in cost:
+                continue
+            c = part * pen + cost[n]
+            if best is None or c < best[0]:
+                best = (c, n, part, (px, py), pen > 1)
+    if best is None:
+        return None
+    _, n, part, (px, py), hz = best
+    n0 = n
+    path, guard = [[round(px, 2), round(py, 2)]], 0
+    while n is not None and guard < 2000:
+        path.append([round(nodes[n][0], 2), round(nodes[n][1], 2)])
+        nn = G["nxt"].get(n)
+        if nn is not None and edge_penalty(nodes[n], nodes[nn]) > 1:
+            hz = True
+        n = nn
+        guard += 1
+    dist = part + G["true_len"].get(n0, 0)
+    return {"exit": G["exit_of"].get(n0) or "exit", "dist": round(dist), "path": path, "hazard": hz or in_hazard(x, y)}
+
+
+def repeater_face(rid):
+    """Map direction (degrees clockwise from up) that the RIGHT arrow on this repeater's sign points to.
+    Set on the Map tab; default = along the tunnel the repeater sits in."""
+    r = mapcfg["repeaters"].get(rid) or {}
+    if r.get("face") is not None:
+        return float(r["face"]) % 360
+    best = None
+    for a, b in tunnel_segments():
+        q = project(r.get("x", 0), r.get("y", 0), a, b)
+        if best is None or q[2] < best[2]:
+            best = q
+    return best[3] if best else 90.0
+
+
+def guide_for_repeater(rid):
+    """(code, distance m) for one repeater's exit sign."""
+    p = rep_pos(rid)
+    if p is None:
+        return None
+    rt = route_from(p[0], p[1])
+    danger = G_DANGER if in_hazard(p[0], p[1]) else 0
+    if rt is None:
+        return (G_NOWAY | danger, 0)
+    if rt["dist"] <= 5:
+        return (G_HERE | danger, rt["dist"])
+    path = rt["path"]
+    tgt = next((q for q in path[1:] if math.hypot(q[0] - p[0], q[1] - p[1]) > 1.5), path[-1])
+    heading = math.degrees(math.atan2(tgt[0] - p[0], tgt[1] - p[1])) % 360
+    rel = angle_diff(heading, repeater_face(rid))
+    code = G_RIGHT if abs(rel) <= 50 else G_LEFT if abs(rel) >= 130 else G_UP
+    return (code | danger, min(rt["dist"], 65535))
+
+
+def update_guide(now):
+    """Recompute the exit-sign table; a new id makes the repeaters take it (ids only grow)."""
+    if EVAC["active"]:
+        g = []
+        for rid in sorted(mapcfg["repeaters"]):
+            n = rep_number(rid)
+            gr = guide_for_repeater(rid)
+            if n is not None and gr is not None:
+                g.append((n, gr[0], int(gr[1])))
+    else:
+        g = []
+    key = (EVAC["active"], tuple(g))
+    if key != EVAC["guide_key"]:
+        if EVAC["guide_id"] or EVAC["active"]:
+            EVAC["guide_id"] = max(EVAC["guide_id"] + 1, int(now) - 1_700_000_000)
+        EVAC.update(guide=g, guide_key=key)
+
+
+def start_evacuation(msg, by, now=None):
+    now = now or time.time()
+    EVAC.update(active=True, since=now, by=by, msg=msg)
+    text = f"EVACUATE - follow the exit signs. {msg}".strip()[:80]
+    alert.update(id=next_alert_id(), level=1, target="*", msg=text, time=now)
+    alert_log.insert(0, {"time": clock(now), "action": "EVACUATION", "target": "ALL WORKERS", "msg": msg})
+    incidents.insert(0, {"t": now, "time": clock(now), "body_id": "EVAC", "name": "Evacuation started",
+                         "from": "SAFE", "to": "DANGER", "why": msg or "started by the control room"})
+    update_guide(now)
+
+
+def stop_evacuation(now=None):
+    now = now or time.time()
+    was = EVAC["active"]
+    EVAC.update(active=False, hazards=[], since=None, by="", msg="")
+    if alert["level"]:
+        alert.update(id=next_alert_id(), level=0, time=now)
+    if was:
+        alert_log.insert(0, {"time": clock(now), "action": "EVACUATION ENDED", "target": "", "msg": ""})
+        incidents.insert(0, {"t": now, "time": clock(now), "body_id": "EVAC", "name": "Evacuation ended",
+                             "from": "DANGER", "to": "SAFE", "why": "ended by the control room"})
+    update_guide(now)
+
+
+@app.post("/api/evac")
+def evac_api():
+    d = request.get_json(force=True, silent=True) or {}
+    act = d.get("action")
+    now = time.time()
+    with lock:
+        if act == "hazard":
+            EVAC["hazards"].append({"x": _num(d.get("x"), -1e5, 1e5, 0), "y": _num(d.get("y"), -1e5, 1e5, 0),
+                                    "r": _num(d.get("r"), 2, 500, EVAC_CFG["radius_m"]),
+                                    "why": str(d.get("why", "marked by the control room"))[:60], "t": now})
+        elif act == "remove_hazard":
+            i = int(_num(d.get("i"), 0, 999, -1))
+            if 0 <= i < len(EVAC["hazards"]):
+                EVAC["hazards"].pop(i)
+        elif act == "start":
+            start_evacuation(str(d.get("msg", "")).strip()[:60] or "Emergency marked on the map", "control room", now)
+        elif act == "stop":
+            stop_evacuation(now)
+            for gs in gas_state.values():
+                gs["last_alert"] = now
+        elif act == "settings":
+            EVAC_CFG["auto_gas"] = bool(d.get("auto_gas", EVAC_CFG["auto_gas"]))
+            EVAC_CFG["radius_m"] = _num(d.get("radius_m"), 2, 500, EVAC_CFG["radius_m"])
+            save("evac.json", EVAC_CFG)
+        else:
+            return jsonify(ok=False, error="unknown action"), 400
+        update_guide(now)
+        return jsonify(ok=True, evac=evac_view())
+
+
+def evac_view():
+    return {k: EVAC[k] for k in ("active", "hazards", "since", "by", "msg", "guide_id")} | {
+        "since_clock": clock(EVAC["since"]) if EVAC["since"] else None, "cfg": EVAC_CFG,
+        "guide": {f"REP-{n:02d}": {"code": c, "dist": dd} for n, c, dd in EVAC["guide"]}}
+
+
+def routes_view():
+    if not mapcfg.get("exits"):
+        return {}
+    out = {}
+    for bid, P in positions.items():
+        if P["x"] is None:
+            continue
+        rt = route_from(P["x"], P["y"])
+        if rt:
+            via = []
+            for q in rt["path"]:
+                for rid, r in mapcfg["repeaters"].items():
+                    if rid not in via and math.hypot(q[0] - r["x"], q[1] - r["y"]) < 6:
+                        via.append(rid)
+            out[bid] = {**rt, "via": via}
+    return out
 
 
 # ---- demo walker: a pretend worker walking the tunnels (no hardware needed) ----
@@ -1263,13 +1628,70 @@ GAS_MODELS = {
                "main": ["CO2", "NH3"],
                "gases": [("CO2", 110.47, -2.862, 400), ("NH3", 102.2, -2.473), ("CO", 605.18, -3.937),
                          ("Alcohol", 77.255, -3.18), ("Toluene", 44.947, -3.445), ("Acetone", 34.668, -3.369)]},
+    "MQ-136": {"clean": 3.6, "note": "hydrogen sulphide (H2S)",
+               "main": ["H2S"],
+               "gases": [("H2S", 36.737, -3.536), ("NH3", 98.551, -2.475), ("CO", 503.34, -3.774)]},
+    "MQ-8":   {"clean": 70.0, "note": "hydrogen (battery charging bays)",
+               "main": ["H2"],
+               "gases": [("H2", 976.97, -0.688)]},
 }
-# name, warning ppm, danger ppm (mine-safety style limits; methane limits = % of the explosive limit)
-GAS_INFO = {"CH4": ["Methane", 5000, 12500], "CO": ["Carbon monoxide", 35, 100], "LPG": ["LPG", 1000, 2100],
-            "Propane": ["Propane", 1000, 2100], "H2": ["Hydrogen", 4000, 10000], "Alcohol": ["Alcohol vapour", 1000, 3000],
-            "CO2": ["Carbon dioxide", 5000, 15000], "NH3": ["Ammonia", 25, 50], "Toluene": ["Toluene", 50, 100],
-            "Acetone": ["Acetone", 500, 1000]}
-GAS_CFG = {"model": "MQ-2", "rl_k": 1.0, "vc": 5.0, "r0": {}, **load("gas.json", {})}
+# ---- gas limits (editable on the Limits tab) -------------------------------------------
+# unit "%" = percent by volume, "ppm" = parts per million. "low": alarm when the value FALLS
+# below the limits (oxygen). Defaults: warning = long-term exposure limit, danger = short-term /
+# legal stop limit. Sources: Coal Mines Regulations 2017 reg. 153(2) (methane, O2, CO2, wet-bulb),
+# NIOSH / OSHA exposure limits (toxic gases), % of the lower explosive limit (hydrogen, LPG).
+GAS_LIMITS_DEFAULT = {
+    "CH4":     {"name": "Methane (firedamp)",       "unit": "%",   "warn": 0.75,  "danger": 1.25,  "alarm": True,
+                "src": "CMR 2017: max 0.75 % in return air, 1.25 % anywhere (explosive 5-15 %)"},
+    "CO":      {"name": "Carbon monoxide",          "unit": "ppm", "warn": 35,    "danger": 100,   "alarm": True,
+                "src": "NIOSH 35 ppm (10 h) · ceiling 200 · IDLH 1200 ppm"},
+    "H2S":     {"name": "Hydrogen sulphide",        "unit": "ppm", "warn": 10,    "danger": 20,    "alarm": True,
+                "src": "NIOSH ceiling 10 ppm · OSHA ceiling 20 · IDLH 100 ppm"},
+    "NO2":     {"name": "Nitrogen dioxide",         "unit": "ppm", "warn": 1,     "danger": 5,     "alarm": True,
+                "src": "NIOSH 1 ppm (15 min) · OSHA ceiling 5 · IDLH 20 ppm (blasting, diesel)"},
+    "SO2":     {"name": "Sulphur dioxide",          "unit": "ppm", "warn": 2,     "danger": 5,     "alarm": True,
+                "src": "NIOSH 2 ppm (10 h) · 5 ppm (15 min) · IDLH 100 ppm"},
+    "NH3":     {"name": "Ammonia",                  "unit": "ppm", "warn": 25,    "danger": 35,    "alarm": True,
+                "src": "NIOSH 25 ppm (10 h) · 35 ppm (15 min) · IDLH 300 ppm"},
+    "CO2":     {"name": "Carbon dioxide (blackdamp)", "unit": "ppm", "warn": 5000, "danger": 30000, "alarm": True,
+                "src": "CMR 2017: max 0.5 % · NIOSH 3 % (15 min) · IDLH 4 %"},
+    "H2":      {"name": "Hydrogen",                 "unit": "ppm", "warn": 4000,  "danger": 10000, "alarm": True,
+                "src": "10 % / 25 % of the explosive limit (4 %)"},
+    "O2":      {"name": "Oxygen",                   "unit": "%",   "warn": 19.5,  "danger": 19.0,  "alarm": True, "low": True,
+                "src": "CMR 2017: not less than 19 % · OSHA 19.5 % (needs an O2 sensor)"},
+    "LPG":     {"name": "LPG",                      "unit": "ppm", "warn": 1000,  "danger": 2100,  "alarm": True,
+                "src": "10 % / 25 % of the explosive limit"},
+    "Propane": {"name": "Propane",                  "unit": "ppm", "warn": 1000,  "danger": 2100,  "alarm": True,
+                "src": "10 % / 25 % of the explosive limit"},
+    "Alcohol": {"name": "Alcohol vapour",           "unit": "ppm", "warn": 1000,  "danger": 3000,  "alarm": False, "src": "side reading"},
+    "Toluene": {"name": "Toluene",                  "unit": "ppm", "warn": 50,    "danger": 100,   "alarm": False, "src": "side reading"},
+    "Acetone": {"name": "Acetone",                  "unit": "ppm", "warn": 500,   "danger": 1000,  "alarm": False, "src": "side reading"},
+}
+GAS_LIMITS = {k: {**v} for k, v in GAS_LIMITS_DEFAULT.items()}
+for _k, _v in load("gas_limits.json", {}).items():
+    if _k in GAS_LIMITS and isinstance(_v, dict):
+        GAS_LIMITS[_k].update({x: _v[x] for x in ("warn", "danger", "alarm") if x in _v})
+
+
+def to_ppm(key, v):
+    return v * 10000 if GAS_LIMITS[key]["unit"] == "%" else v
+
+
+def gas_info():
+    """name, warning ppm, danger ppm (methane limits converted from % to ppm)."""
+    return {k: [g["name"], to_ppm(k, g["warn"]), to_ppm(k, g["danger"])] for k, g in GAS_LIMITS.items()}
+GAS_CFG = {"model": "MQ-2", "rl_k": 1.0, "vc": 5.0, "r0": {}, "models": {"2": "MQ-7", "3": "MQ-136"}, **load("gas.json", {})}
+GAS_CFG.setdefault("models", {"2": "MQ-7", "3": "MQ-136"})
+
+
+def ch_model(ch):
+    """Sensor model on gas channel 1, 2 or 3 (same for every repeater)."""
+    m = GAS_CFG["model"] if str(ch) == "1" else GAS_CFG["models"].get(str(ch), "MQ-7")
+    return m if m in GAS_MODELS else "MQ-2"
+
+
+def r0_key(rid, ch):
+    return rid if str(ch) == "1" else f"{rid}#{ch}"
 
 
 def gas_rs(mv):
@@ -1325,11 +1747,21 @@ def check_air(now):
             air_state[rid] = lv
 
 
-def gas_sample(rid, r, now):
+def gas_channels(r):
+    """[(channel number, channel dict)] for one repeater: channel 1 lives in the repeater record
+    itself (gas_mv, gas_warm ... as before), channels 2 and 3 in r["gas_x"]."""
+    out = [(1, r)] if "gas_mv" in r else []
+    for ch, d in sorted((r.get("gas_x") or {}).items()):
+        out.append((int(ch), d))
+    return out
+
+
+def gas_sample(rid, r, now, ch=1):
     """Called for every gas reading. Auto-calibrates R0 from the first minute of clean
     readings after warm-up (until the admin calibrates by hand)."""
+    key = r0_key(rid, ch)
     if r.get("gas_missing"):                 # unplugged: learn clean air again once it is back
-        if GAS_CFG["r0"].pop(rid, None):
+        if GAS_CFG["r0"].pop(key, None):
             save("gas.json", GAS_CFG)
         r.pop("rs_hist", None)
         return
@@ -1340,21 +1772,22 @@ def gas_sample(rid, r, now):
         return
     h = r.setdefault("rs_hist", deque(maxlen=30))
     h.append(rs)
-    cal = GAS_CFG["r0"].get(rid)
+    cal = GAS_CFG["r0"].get(key)
     if cal is None and len(h) >= 12:
         med = sorted(h)[len(h) // 2]
-        GAS_CFG["r0"][rid] = {"r0": med / GAS_MODELS[GAS_CFG["model"]]["clean"], "rs_clean": med,
-                              "how": "auto", "time": clock(now), "model": GAS_CFG["model"]}
+        GAS_CFG["r0"][key] = {"r0": med / GAS_MODELS[ch_model(ch)]["clean"], "rs_clean": med,
+                              "how": "auto", "time": clock(now), "model": ch_model(ch)}
         save("gas.json", GAS_CFG)
 
 
-def gas_analysis(rid, r):
+def gas_analysis(rid, r, ch=1):
     if r.get("gas_missing") or "gas_mv" not in r:
         return None
-    model = GAS_MODELS[GAS_CFG["model"]]
+    mname = ch_model(ch)
+    model = GAS_MODELS[mname]
     rs = gas_rs(r["gas_mv"])
-    cal = GAS_CFG["r0"].get(rid)
-    out = {"model": GAS_CFG["model"], "note": model["note"], "rs": None if rs is None else round(rs, 2),
+    cal = GAS_CFG["r0"].get(r0_key(rid, ch))
+    out = {"model": mname, "note": model["note"], "rs": None if rs is None else round(rs, 2), "ch": ch,
            "cal": None, "ratio": None, "gases": [], "warming": bool(r.get("gas_warm"))}
     if cal:
         out["cal"] = {"how": cal["how"], "time": cal["time"]}
@@ -1369,10 +1802,40 @@ def gas_analysis(rid, r):
         # (the curve fits are poor at the clean-air end), CO2 adds the normal 400 ppm of fresh air
         ppm = max(0.0, a * ratio ** b - a * model["clean"] ** b)
         ppm = min(ppm + (g[3] if len(g) > 3 else 0), 1e6)
-        name, warn, danger = GAS_INFO[key]
-        out["gases"].append({"key": key, "name": name, "ppm": round(ppm, 1), "warn": warn, "danger": danger,
-                             "level": 2 if ppm >= danger else 1 if ppm >= warn else 0, "main": key in model["main"]})
+        lim = GAS_LIMITS[key]
+        warn, danger = to_ppm(key, lim["warn"]), to_ppm(key, lim["danger"])
+        out["gases"].append({"key": key, "name": lim["name"], "ppm": round(ppm, 1), "warn": warn, "danger": danger,
+                             "unit": lim["unit"], "level": 2 if ppm >= danger else 1 if ppm >= warn else 0,
+                             "main": key in model["main"] and lim.get("alarm", True)})
     return out
+
+
+def gas_level(rid, r):
+    """Worst gas level at one repeater over all its channels: (level, [reasons], top mV)."""
+    lv, why, top = 0, [], 0
+    for ch, d in gas_channels(r):
+        if d.get("gas_missing"):
+            continue
+        top = max(top, d.get("gas_mv", 0))
+        if d.get("gas_local") or (not d.get("gas_warm") and d.get("gas_mv", 0) >= LIMITS["gas_alarm_mv"]):
+            lv = 2
+            why.append(f"sensor {ch} {d.get('gas_mv')} mV")
+        ga = gas_analysis(rid, d, ch)
+        for g in (ga or {}).get("gases", []):
+            if g["main"] and g["level"]:
+                lv = max(lv, g["level"])
+                v = g["ppm"] / 10000 if g["unit"] == "%" else g["ppm"]
+                why.append(f"{g['key']} {v:.2f} %" if g["unit"] == "%" else f"{g['key']} ~{v:.0f} ppm")
+    for k, v in (r.get("direct") or {}).items():          # electrochemical / NDIR sensors that report the value itself
+        lim = GAS_LIMITS.get(k)
+        if not lim or not lim.get("alarm", True):
+            continue
+        bad2 = v <= lim["danger"] if lim.get("low") else v >= lim["danger"]
+        bad1 = v <= lim["warn"] if lim.get("low") else v >= lim["warn"]
+        if bad2 or bad1:
+            lv = max(lv, 2 if bad2 else 1)
+            why.append(f"{k} {v} {lim['unit']}")
+    return lv, why, top
 
 
 @app.post("/api/gas")
@@ -1381,28 +1844,34 @@ def gas_settings():
     with lock:
         if d.get("model") in GAS_MODELS:
             GAS_CFG["model"] = d["model"]
+        for ch in ("2", "3"):
+            if d.get("model" + ch) in GAS_MODELS:
+                GAS_CFG["models"][ch] = d["model" + ch]
         if "rl_k" in d:
             GAS_CFG["rl_k"] = _num(d["rl_k"], 0.1, 100, 1.0)
         if "vc" in d:
             GAS_CFG["vc"] = _num(d["vc"], 3.0, 5.5, 5.0)
         if "gas_alarm_mv" in d:
             LIMITS["gas_alarm_mv"] = int(_num(d["gas_alarm_mv"], 100, 5000, LIMITS["gas_alarm_mv"]))
-            save("settings.json", {"gas_alarm_mv": LIMITS["gas_alarm_mv"]})
+            save("settings.json", LIMITS)
         save("gas.json", GAS_CFG)
     return jsonify(ok=True)
 
 
 @app.post("/api/gas/calibrate")
 def gas_calibrate():
-    rid = str((request.get_json(force=True, silent=True) or {}).get("repeater", "")).upper()
+    d = request.get_json(force=True, silent=True) or {}
+    rid = str(d.get("repeater", "")).upper()
+    ch = int(_num(d.get("ch", 1), 1, 3, 1))
     with lock:
         r = repeaters.get(rid)
-        h = list((r or {}).get("rs_hist", []))[-10:]
+        src = r if ch == 1 else ((r or {}).get("gas_x") or {}).get(str(ch))
+        h = list((src or {}).get("rs_hist", []))[-10:]
         if not h:
-            return jsonify(ok=False, error=f"No gas readings from {rid} yet (sensor still warming up?)"), 400
+            return jsonify(ok=False, error=f"No gas readings from {rid} sensor {ch} yet (sensor still warming up?)"), 400
         med = sorted(h)[len(h) // 2]
-        GAS_CFG["r0"][rid] = {"r0": med / GAS_MODELS[GAS_CFG["model"]]["clean"], "rs_clean": med,
-                              "how": "clean air", "time": clock(), "model": GAS_CFG["model"]}
+        GAS_CFG["r0"][r0_key(rid, ch)] = {"r0": med / GAS_MODELS[ch_model(ch)]["clean"], "rs_clean": med,
+                                          "how": "clean air", "time": clock(), "model": ch_model(ch)}
         save("gas.json", GAS_CFG)
     return jsonify(ok=True)
 
@@ -1448,11 +1917,16 @@ def state():
             age = now - r["last_seen"]
             limit = LIMITS["mesh_repeater_offline_s"] if r.get("via_mesh") else LIMITS["repeater_offline_s"]
             lv, why = air_level(r)
-            reps.append({**{k: v for k, v in r.items() if k not in ("gas_hist", "rs_hist", "air_hist")}, "age": round(age, 1),
+            glv, gwhy, gtop = gas_level(r["id"], r)
+            chs = [{"ch": ch, "mv": dd.get("gas_mv"), "warm": dd.get("gas_warm"), "local": dd.get("gas_local"),
+                    "missing": dd.get("gas_missing"), "spark": [g[1] for g in dd.get("gas_hist", [])[-40:]],
+                    "ana": gas_analysis(r["id"], dd, ch)} for ch, dd in gas_channels(r)]
+            reps.append({**{k: v for k, v in r.items() if k not in ("gas_hist", "rs_hist", "air_hist", "gas_x")}, "age": round(age, 1),
                          "online": age < limit, "gas_spark": [g[1] for g in r.get("gas_hist", [])[-40:]],
                          "air_level": lv, "air_why": why,
                          "air_spark": [[a[1], a[2]] for a in r.get("air_hist", [])[-60:]],
-                         "gas": gas_analysis(r["id"], r) if "gas_mv" in r else None})
+                         "gas": gas_analysis(r["id"], r) if "gas_mv" in r else None,
+                         "gas_chs": chs, "gas_level": glv, "gas_why": gwhy, "gas_top": gtop})
         reps.sort(key=lambda r: r["id"])
         online = [r for r in reps if r["online"]]
         a = dict(alert)
@@ -1474,8 +1948,9 @@ def state():
             ai={k: ai[k] for k in ("state", "detail", "classes", "ppe_error")}, kitchecks=kitchecks[:24],
             kitrefs=kitrefs["photos"], ref_match=REF_MATCH,
             kit_names=KIT_NAMES, map=mapcfg, map_start=start_heading(), positions=positions_view(now), demo=demo["on"],
-            gas_cfg={k: GAS_CFG[k] for k in ("model", "rl_k", "vc")}, gas_models=list(GAS_MODELS),
-            gas_info=GAS_INFO)
+            gas_cfg={k: GAS_CFG[k] for k in ("model", "rl_k", "vc", "models")}, gas_models=list(GAS_MODELS),
+            gas_model_notes={k: v["note"] for k, v in GAS_MODELS.items()},
+            gas_info=gas_info(), gas_limits=GAS_LIMITS, gas_order=list(GAS_LIMITS), evac=evac_view(), routes=routes_view())
 
 
 @app.post("/api/kitcheck")
@@ -1778,6 +2253,14 @@ tr.bad td{background:#ff4d4f14}
 .anum small{display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
 .anum b{font-family:var(--mono);font-size:20px}.anum b i{font-style:normal;font-size:12px;color:var(--muted);margin-left:2px}
 .akey{display:flex;gap:12px;font-size:12px;color:var(--muted)}.akey i{display:inline-block;width:10px;height:3px;border-radius:2px;vertical-align:middle;margin-right:4px}
+/* limits + evacuation */
+#lim-gas input[type=number]{width:92px}#lim-gas td small{color:var(--muted)}
+.limgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.form label.chk,label.chk{display:flex;gap:10px;align-items:center;flex-direction:row}.form label.chk input{width:auto;flex:none}
+.evac-on{border-color:var(--danger)!important;background:#3a1416!important}
+.bigbtn{width:100%;padding:14px;font-size:16px;font-weight:700}
+.rtag{display:inline-block;margin-top:4px;padding:3px 8px;border-radius:6px;background:#0e2a1a;color:#7ee2a8;font-size:12px}
+.rtag.hz{background:#3a1416;color:#ff8a8c}
 /* splash */
 #splash{position:fixed;inset:0;z-index:100;background:#12171A;display:flex;flex-direction:column;justify-content:center;padding:0 calc(9vw + 24px) 0 9vw;gap:3vh;overflow:hidden;transition:opacity .45s,visibility .45s}
 #splash::after{content:"";position:absolute;top:0;right:0;width:clamp(18px,2.2vw,40px);height:100%;background:var(--stripe)}
@@ -1816,6 +2299,7 @@ tr.bad td{background:#ff4d4f14}
     <button data-v="entry">Entry check <span class="n" id="n-entry" hidden></span></button>
     <button data-v="kit">Kit check (AI)</button>
     <button data-v="network">Network</button>
+    <button data-v="limits">Limits</button>
     <button data-v="log">Incident log</button>
   </nav>
 </div>
@@ -1835,6 +2319,8 @@ tr.bad td{background:#ff4d4f14}
           <button class="btn small" data-tool="scale">📏 Set scale</button>
           <button class="btn small" data-tool="tunnel">〰 Draw tunnel</button>
           <button class="btn small" data-tool="repeater">📡 Place</button><select id="m-rep" aria-label="Repeater to place"></select>
+          <button class="btn small" data-tool="exit">🚪 Exit</button>
+          <button class="btn small" data-tool="hazard" style="color:#ff8a8c">🔥 Emergency</button>
           <button class="btn small" data-tool="erase">🧽 Erase</button>
           <span class="sep"></span>
           <button class="btn small" id="m-zin" aria-label="Zoom in">＋</button><button class="btn small" id="m-zout" aria-label="Zoom out">－</button>
@@ -1850,9 +2336,12 @@ tr.bad td{background:#ff4d4f14}
         <div class="mcoord" id="m-coord"></div>
       </div>
       <aside class="mside">
+        <div class="panel" id="m-evac"></div>
         <div class="panel"><h3>Workers on the map</h3><div id="m-workers" style="display:grid;gap:8px"></div></div>
         <div class="panel"><h3>Repeaters</h3><div id="m-reps" style="display:grid;gap:6px"></div>
-          <p class="note" style="margin:8px 0 0">z = height of the repeater (level), metres. Negative = below the hub.</p></div>
+          <p class="note" style="margin:8px 0 0">z = height of the repeater (level), metres. Negative = below the hub.
+            → = the way the <b>right arrow</b> on its exit sign points on the map (amber arrow); <b>⇄</b> flips it if the sign is mounted the other way round.</p></div>
+        <div class="panel"><h3>Exits</h3><div id="m-exits" style="display:grid;gap:6px"></div></div>
         <div class="panel form"><h3>Tracking settings</h3>
           <div class="row2"><label>Step length (m)<input id="ms-step" type="number" step="0.05" min="0.3" max="1.2"></label>
             <label>Start direction (°)<input id="ms-dir" type="number" step="5" placeholder="auto"></label></div>
@@ -1879,6 +2368,38 @@ tr.bad td{background:#ff4d4f14}
       → ppm from the datasheet curve of each gas, counted above the clean-air level. One MQ sensor reacts to all of its gases together, so each value assumes it is the only gas present —
       treat them as <b>estimates</b>. Any gas reaching its danger level, or the backup mV level, alerts <b>all</b> workers automatically.
       R0 is learned by itself from the first minute after warm-up (assumes clean air); press <b>Calibrate in clean air</b> to redo it.</p>
+  </section>
+
+  <section class="view" id="v-limits">
+    <div class="panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+        <h3 style="margin:0">Gas limits</h3>
+        <span><button class="btn ghost small" id="lim-reset">Reset to the standard values</button> <button class="btn green" id="lim-save">Save all limits</button></span>
+      </div>
+      <p class="note">A gas reaching its <b>warning</b> level turns that repeater yellow and is logged. Reaching <b>danger</b> (with “Alarm” ticked) sounds every buzzer
+        and lights every worker's LED — and, if switched on below, starts an <b>evacuation</b> with that repeater's area marked as the danger zone.
+        Methane, oxygen: % by volume. Others: ppm. Oxygen alarms when it falls <b>below</b> the levels.</p>
+      <div class="tbl"><table id="lim-gas"></table></div>
+    </div>
+    <div class="two" style="margin-top:14px">
+      <div class="panel form"><h3>Gas sensor on each channel</h3>
+        <p class="note" style="margin-top:0">Same for every repeater. Channel 1 = D2, channel 2 = D0, channel 3 = D1 on the XIAO ESP32-C6
+          (set <span class="mono">GAS_CHANNELS</span> in the repeater code).</p>
+        <div class="row2"><label>Channel 1<select id="lim-m1"></select></label><label>Channel 2<select id="lim-m2"></select></label></div>
+        <div class="row2"><label>Channel 3<select id="lim-m3"></select></label><span></span></div>
+        <div class="note" id="lim-mnote"></div>
+      </div>
+      <div class="panel form"><h3>Evacuation</h3>
+        <label class="chk"><input type="checkbox" id="lim-auto"> Start an evacuation automatically when a gas reaches its danger level</label>
+        <label>Danger-zone radius around that repeater (m)<input id="lim-rad" type="number" min="2" max="500" step="1"></label>
+        <p class="note" style="margin:0">Routes avoid the danger zone when another way out exists. Exits and the zone can also be set by hand on the Map tab.</p>
+      </div>
+    </div>
+    <div class="two" style="margin-top:14px">
+      <div class="panel form"><h3>Body unit limits</h3><div id="lim-body" class="limgrid"></div></div>
+      <div class="panel form"><h3>Air / heat at the repeaters</h3><div id="lim-air" class="limgrid"></div>
+        <p class="note" style="margin:0">Wet-bulb: CMR 2017 reg. 153(2) — more ventilation above 30.5 °C, no normal work above 33.5 °C.</p></div>
+    </div>
   </section>
 
   <section class="view" id="v-workers">
@@ -2006,7 +2527,7 @@ function showTab(v){
   document.querySelectorAll("nav button").forEach(b => b.classList.toggle("on", b.dataset.v === v));
   document.querySelectorAll(".view").forEach(x => x.classList.toggle("on", x.id === "v-" + v));
   history.replaceState(null, "", "#" + v);
-  if (S) { renderMap(); renderMapSide(); renderGas(); }
+  if (S) { renderMap(); renderMapSide(); renderGas(); renderLimits(true); }
 }
 $("#tabs").onclick = e => { const b = e.target.closest("button"); if (b) showTab(b.dataset.v); };
 if (location.hash.length > 1 && $("#v-" + location.hash.slice(1))) showTab(location.hash.slice(1));
@@ -2035,10 +2556,11 @@ function render(){
   $("#chips").innerHTML = [["SAFE","var(--safe)","Safe"],["WARNING","var(--warn)","Warning"],["DANGER","var(--danger)","Danger"],["NO DATA","var(--nodata)","No data"]]
     .map(([k,c,l]) => `<span class="chip" onclick="showTab('live')"><span class="d" style="background:${c}"></span>${l} <b>${sm[k]}</b></span>`).join("")
     + `<span class="chip" onclick="showTab('network')">Repeaters <b>${S.repeaters.filter(r=>r.online).length}/${S.repeaters.length}</b></span>`
-    + (() => { const g = S.repeaters.filter(r => r.online && r.gas_mv != null && !r.gas_missing); if (!g.length) return "";
-        const lvl = r => r.gas_local || r.gas_mv >= S.limits.gas_alarm_mv || (r.gas && r.gas.gases.some(q => q.main && q.level === 2)) ? 2 : r.gas && r.gas.gases.some(q => q.main && q.level === 1) ? 1 : 0;
-        const top = g.reduce((a, b) => lvl(b) > lvl(a) || (lvl(b) === lvl(a) && b.gas_mv > a.gas_mv) ? b : a), high = lvl(top) === 2;
-        return `<span class="chip" onclick="showTab('gas')" style="${high ? "background:var(--danger);border-color:var(--danger);color:#fff" : ""}"><span class="d" style="background:${high ? "#fff" : "var(--safe)"}"></span>Gas <b>${top.gas_mv} mV</b> ${esc(top.id)}</span>`; })()
+    + (() => { const g = S.repeaters.filter(r => r.online && (r.gas_chs || []).some(c => !c.missing)); if (!g.length) return "";
+        const top = g.reduce((a, b) => (b.gas_level || 0) > (a.gas_level || 0) || ((b.gas_level || 0) === (a.gas_level || 0) && b.gas_top > a.gas_top) ? b : a), lv = top.gas_level || 0;
+        const c = ["var(--safe)", "var(--warn)", "#fff"][lv];
+        return `<span class="chip" onclick="showTab('gas')" style="${lv === 2 ? "background:var(--danger);border-color:var(--danger);color:#fff" : ""}" title="${esc((top.gas_why || []).join(", "))}"><span class="d" style="background:${c}"></span>Gas <b>${(top.gas_why || [])[0] ? esc(top.gas_why[0]) : top.gas_top + " mV"}</b> ${esc(top.id)}</span>`; })()
+    + (S.evac.active ? `<span class="chip" onclick="showTab('map')" style="background:var(--danger);border-color:var(--danger);color:#fff">🚨 EVACUATION</span>` : "")
     + (() => { const g = S.repeaters.filter(r => r.online && r.air_t != null); if (!g.length) return "";
         const top = g.reduce((a, b) => (b.air_level || 0) > (a.air_level || 0) || ((b.air_level || 0) === (a.air_level || 0) && b.air_wb > a.air_wb) ? b : a);
         const c = ["var(--safe)", "var(--warn)", "var(--danger)"][top.air_level || 0];
@@ -2048,8 +2570,9 @@ function render(){
   // alert banner
   const a = S.alert;
   $("#banner").classList.toggle("on", !!a.level);
-  if (a.level) $("#banner-text").innerHTML = `${esc(a.target_name)} · since ${esc(a.since)}${a.msg ? " · " + esc(a.msg) : ""}
-     · Repeaters buzzing <b class="mono">${a.rep_ack}/${a.rep_total}</b> · Red LED confirmed <b class="mono">${a.led_ack}/${a.led_total}</b>`;
+  if (a.level) $("#banner-text").innerHTML = `${S.evac.active ? "<b>🚨 EVACUATION</b> · " : ""}${esc(a.target_name)} · since ${esc(a.since)}${a.msg ? " · " + esc(a.msg) : ""}
+     · Repeaters buzzing <b class="mono">${a.rep_ack}/${a.rep_total}</b> · Red LED confirmed <b class="mono">${a.led_ack}/${a.led_total}</b>
+     ${S.evac.active ? ` · Exit signs <b class="mono">${S.repeaters.filter(r => r.online && r.gid === S.evac.guide_id).length}/${Object.keys(S.evac.guide || {}).length}</b> <a href="#map" onclick="showTab('map')" style="color:#fff">open map</a>` : ""}`;
 
   // live cards
   $("#cards").innerHTML = S.workers.length ? S.workers.map(card).join("") :
@@ -2115,7 +2638,7 @@ function render(){
   if (S.incidents.length) lastIncidentT = Math.max(lastIncidentT, S.incidents[0].t); else if (!lastIncidentT) lastIncidentT = S.now;
 
   renderKit();
-  renderMap(); renderMapSide(); renderGas();
+  renderMap(); renderMapSide(); renderGas(); renderLimits();
   if (openId) renderDrawer();
 }
 
@@ -2169,7 +2692,8 @@ function card(w){
     <div class="tags">${w.cleared ? '<span class="tag ok">Entry cleared ✓</span>' : '<span class="tag">Entry not verified</span>'}
       <span class="tag">Blood ${esc(w.blood || "?")}</span>${L && (L.fl & 64) ? '<span class="tag red">LED ALERT ON</span>' : ""}
       ${L ? `<span class="tag">📍 Near ${esc(L.near)} · ${L.hops} hop${L.hops===1?"":"s"}</span>` : ""}
-      ${S.positions[w.body_id] ? `<span class="tag" onclick="event.stopPropagation();showTab('map');centerOn('${esc(w.body_id)}')">🗺 ${Math.round(Math.hypot(S.positions[w.body_id].x, S.positions[w.body_id].y))} m from hub${S.positions[w.body_id].z ? " · z " + S.positions[w.body_id].z + " m" : ""}</span>` : ""}</div>
+      ${S.positions[w.body_id] ? `<span class="tag" onclick="event.stopPropagation();showTab('map');centerOn('${esc(w.body_id)}')">🗺 ${Math.round(Math.hypot(S.positions[w.body_id].x, S.positions[w.body_id].y))} m from hub${S.positions[w.body_id].z ? " · z " + S.positions[w.body_id].z + " m" : ""}</span>` : ""}
+      ${S.evac.active && S.routes[w.body_id] ? `<span class="tag ${S.routes[w.body_id].hazard ? "red" : "ok"}">🚪 ${esc(S.routes[w.body_id].exit)} · ${S.routes[w.body_id].dist} m</span>` : ""}</div>
   </div>`;
 }
 
@@ -2408,7 +2932,10 @@ const HINTS = {
   tunnel: () => `<b>Draw tunnel:</b> click along the tunnel's centre line. Start on an existing tunnel to join it. ` +
     (draft.length ? `${draft.length} point(s) — <button class="btn small green" id="m-fin">Finish (Enter)</button> <button class="btn small ghost" id="m-undo">Undo point</button> <button class="btn small ghost" id="m-cancel">Cancel (Esc)</button>` : ""),
   repeater: () => `<b>Place repeater:</b> pick it in the list, then click where it is mounted. It jumps onto the tunnel if you click close to one.`,
-  erase: () => `<b>Erase:</b> click a repeater to take it off the map, or a tunnel to remove that tunnel line.`,
+  exit: () => `<b>Exit:</b> click where workers leave the mine — shaft bottom, adit, refuge chamber. It jumps onto the tunnel if you click close to one. Every worker gets a route to the nearest exit.`,
+  hazard: () => `<b>Emergency:</b> click the spot of the fire / gas / roof fall. Danger radius <input id="m-hzr" type="number" min="2" max="500" step="1" value="${S && S.evac ? S.evac.cfg.radius_m : 25}" style="width:70px"> m.
+    Routes go around it when they can. ${S && S.evac && S.evac.active ? "Evacuation is running — the exit signs update by themselves." : "Then press <b>START EVACUATION</b> on the right."}`,
+  erase: () => `<b>Erase:</b> click a repeater to take it off the map, an exit, a danger zone, or a tunnel to remove that tunnel line.`,
 };
 function setTool(t){
   tool = t; draft = []; scalePts = [];
@@ -2450,7 +2977,8 @@ function mapClick(sx, sy){
     return;
   }
   if (tool === "origin"){                  // move everything so the clicked point becomes (0,0)
-    const part = {repeaters: {}, tunnels: M.tunnels.map(l => l.map(p => [r2(p[0] - x), r2(p[1] - y)]))};
+    const part = {repeaters: {}, tunnels: M.tunnels.map(l => l.map(p => [r2(p[0] - x), r2(p[1] - y)])),
+                  exits: (M.exits || []).map(e => ({...e, x: r2(e.x - x), y: r2(e.y - y)}))};
     Object.entries(M.repeaters).forEach(([k, r]) => part.repeaters[k] = {...r, x: r2(r.x - x), y: r2(r.y - y)});
     if (M.image){ part.ox = M.ox + x * M.ppm; part.oy = M.oy - y * M.ppm; }
     MV.tx += x * MV.k; MV.ty -= y * MV.k;
@@ -2474,7 +3002,24 @@ function mapClick(sx, sy){
     const next = [...$("#m-rep").options].map(o => o.value).find(v => !reps[v]); if (next) $("#m-rep").value = next;
     return;
   }
+  if (tool === "exit"){
+    const n = nearestOnTunnels(x, y), p = n && n.d < 4 ? n.q : [x, y];
+    const name = (prompt("Name of this exit (e.g. Main shaft, East adit, Refuge chamber 1):", `Exit ${(M.exits || []).length + 1}`) || "").trim();
+    if (!name) return;
+    saveMap({exits: [...(M.exits || []), {name, x: r2(p[0]), y: r2(p[1])}]});
+    toast(`Exit <b>${esc(name)}</b> added.`, "SAFE"); return;
+  }
+  if (tool === "hazard"){
+    const r = parseFloat(($("#m-hzr") || {}).value) || S.evac.cfg.radius_m;
+    api("/api/evac", {action: "hazard", x: r2(x), y: r2(y), r}).then(poll);
+    toast(S.evac.active ? "Danger zone added — routes and exit signs are updating." : "Danger zone marked. Press <b>START EVACUATION</b> on the right to warn everyone.", "DANGER");
+    return;
+  }
   if (tool === "erase"){
+    const hitE = (M.exits || []).findIndex(e => { const [px, py] = W2S(e.x, e.y); return Math.hypot(px - sx, py - sy) < 16; });
+    if (hitE >= 0){ saveMap({exits: M.exits.filter((_, i) => i !== hitE)}); return; }
+    const hitH = (S.evac.hazards || []).findIndex(h => Math.hypot(x - h.x, y - h.y) <= h.r);
+    if (hitH >= 0){ api("/api/evac", {action: "remove_hazard", i: hitH}).then(poll); return; }
     const hitR = Object.entries(M.repeaters).find(([k, r]) => { const [px, py] = W2S(r.x, r.y); return Math.hypot(px - sx, py - sy) < 14; });
     if (hitR){ const reps = {...M.repeaters}; delete reps[hitR[0]]; saveMap({repeaters: reps}); return; }
     const n = nearestOnTunnels(x, y);
@@ -2489,7 +3034,8 @@ function applyScale(){
   const D = parseFloat($("#m-dist").value), [a, b] = scalePts, dw = Math.hypot(a[0] - b[0], a[1] - b[1]);
   if (!(D > 0) || !(dw > 0)) return toast("Type the real distance in metres.", "WARNING");
   const f = D / dw;                         // new metres per old metre - everything is stretched about the hub
-  const part = {repeaters: {}, tunnels: M.tunnels.map(l => l.map(p => [r2(p[0] * f), r2(p[1] * f)]))};
+  const part = {repeaters: {}, tunnels: M.tunnels.map(l => l.map(p => [r2(p[0] * f), r2(p[1] * f)])),
+                exits: (M.exits || []).map(e => ({...e, x: r2(e.x * f), y: r2(e.y * f)}))};
   Object.entries(M.repeaters).forEach(([k, r]) => part.repeaters[k] = {...r, x: r2(r.x * f), y: r2(r.y * f)});
   if (M.image) part.ppm = M.ppm / f;
   MV.k /= f; saveMap(part); api("/api/positions/reset", {body_id: "*"});
@@ -2522,7 +3068,7 @@ $("#m-fit").onclick = () => fitMap();
 function fitMap(){
   const pts = [[0, 0]];
   if (M.image) pts.push([-M.ox / M.ppm, M.oy / M.ppm], [(M.img_w - M.ox) / M.ppm, (M.oy - M.img_h) / M.ppm]);
-  M.tunnels.forEach(l => pts.push(...l)); Object.values(M.repeaters).forEach(r => pts.push([r.x, r.y]));
+  M.tunnels.forEach(l => pts.push(...l)); Object.values(M.repeaters).forEach(r => pts.push([r.x, r.y])); (M.exits || []).forEach(e => pts.push([e.x, e.y]));
   Object.values(S.positions).forEach(p => pts.push([p.x, p.y]));
   let x0 = Math.min(...pts.map(p => p[0])), x1 = Math.max(...pts.map(p => p[0])), y0 = Math.min(...pts.map(p => p[1])), y1 = Math.max(...pts.map(p => p[1]));
   if (x1 - x0 < 20){ const c = (x0 + x1) / 2; x0 = c - 10; x1 = c + 10; } if (y1 - y0 < 20){ const c = (y0 + y1) / 2; y0 = c - 10; y1 = c + 10; }
@@ -2580,6 +3126,21 @@ function renderMap(){
   if (scalePts.length){ const pts = [...scalePts, ...(scalePts.length === 1 && mouseW ? [mouseW] : [])].map(p => W2S(p[0], p[1]));
     out.push(`<polyline points="${pts.map(p => p.join(",")).join(" ")}" fill="none" stroke="#f0b429" stroke-width="2" stroke-dasharray="6 4"/>`);
     pts.forEach(p => out.push(`<circle cx="${p[0]}" cy="${p[1]}" r="5" fill="#f0b429"/>`)); }
+  // danger zones
+  const EV = S.evac || {hazards: [], guide: {}};
+  (EV.hazards || []).forEach((h, i) => { const [x, y] = W2S(h.x, h.y), rr = Math.max(h.r * k, 8);
+    out.push(`<circle cx="${x}" cy="${y}" r="${rr}" fill="#ff4d4f26" stroke="#ff4d4f" stroke-width="2" stroke-dasharray="6 4"/>`,
+      `<circle class="ring" cx="${x}" cy="${y}" r="10" fill="none" stroke="#ff4d4f" stroke-width="2"/>`,
+      `<text x="${x}" y="${y - rr - 6}" text-anchor="middle" font-size="12" font-weight="700" fill="#ff8a8c">🔥 ${esc(h.why || "danger")}</text>`); });
+  // evacuation routes (faint when no evacuation is running)
+  Object.entries(S.routes || {}).forEach(([id, r]) => { if (r.path.length < 2) return;
+    const pts = r.path.map(p => W2S(p[0], p[1]).join(",")).join(" ");
+    out.push(`<polyline points="${pts}" fill="none" stroke="${r.hazard ? "#ff8a8c" : "#35c47c"}" stroke-width="${EV.active ? 4 : 2}" stroke-opacity="${EV.active ? .9 : .35}" stroke-dasharray="${EV.active ? "10 6" : "4 6"}" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrG)"/>`); });
+  // exits
+  (M.exits || []).forEach(e => { const [x, y] = W2S(e.x, e.y);
+    out.push(`<rect x="${x - 15}" y="${y - 9}" width="30" height="18" rx="3" fill="#178a4a" stroke="#0a0f12" stroke-width="2"/>`,
+      `<text x="${x}" y="${y + 4}" text-anchor="middle" font-size="10" font-weight="800" fill="#fff">EXIT</text>`,
+      `<text x="${x}" y="${y + 24}" text-anchor="middle" font-size="12" font-weight="700" fill="#7ee2a8">${esc(e.name)}</text>`); });
   // hub + start direction
   const [hx, hy] = W2S(0, 0), sd = (M.start_dir ?? S.map_start ?? 0) * Math.PI / 180;
   out.push(`<line x1="${hx}" y1="${hy}" x2="${hx + Math.sin(sd) * 34}" y2="${hy - Math.cos(sd) * 34}" stroke="#4c9bf0" stroke-width="2" marker-end="url(#arr)"/>`,
@@ -2589,10 +3150,16 @@ function renderMap(){
   const live = {}; S.repeaters.forEach(r => live[r.id] = r);
   Object.entries(M.repeaters).forEach(([id, r]) => {
     const [x, y] = W2S(r.x, r.y), L = live[id];
-    const gl = L && L.gas ? Math.max(0, ...L.gas.gases.filter(q => q.main).map(q => q.level)) : 0, gasHigh = L && (gl === 2 || L.gas_local);
+    const gl = L ? (L.gas_level || 0) : 0, gasHigh = L && gl === 2;
     const col = !L ? "#6b7a80" : !L.online ? "#ff4d4f" : "#35c47c";
     out.push(`<circle cx="${x}" cy="${y}" r="${Math.max(2.5 * k, 10)}" fill="${gasHigh ? "#ff4d4f22" : "#35c47c0d"}" stroke="${gasHigh ? "#ff4d4f" : gl === 1 ? "#f0b429" : "#35c47c33"}" stroke-dasharray="3 3"/>`);
     if (L && L.buzzing) out.push(`<circle class="ring" cx="${x}" cy="${y}" r="9" fill="none" stroke="#ff4d4f" stroke-width="2"/>`);
+    const fc = (r.face ?? null) !== null ? r.face : (L && L.face != null ? L.face : null), fd = ((fc ?? repFaceGuess(r)) * Math.PI) / 180;
+    out.push(`<line x1="${x}" y1="${y}" x2="${x + Math.sin(fd) * 26}" y2="${y - Math.cos(fd) * 26}" stroke="#f0b429" stroke-width="2" marker-end="url(#arrA)" opacity=".8"/>`);
+    const gd = EV.active && EV.guide ? EV.guide[id] : null;
+    if (gd){ const sym = {1: "◀", 2: "▶", 3: "▲", 4: "EXIT", 5: "✖"}[gd.code & 15] || "";
+      out.push(`<rect x="${x - 22}" y="${y + 12}" width="44" height="17" rx="3" fill="#000" stroke="${gd.code & 16 ? "#ff4d4f" : "#35c47c"}"/>`,
+        `<text x="${x}" y="${y + 25}" text-anchor="middle" font-size="11" font-weight="800" fill="${gd.code & 16 ? "#ff8a8c" : "#7ee2a8"}">${sym}${(gd.code & 15) < 4 ? " " + gd.dist + "m" : ""}</text>`); }
     out.push(`<rect x="${x - 7}" y="${y - 7}" width="14" height="14" rx="3" fill="${col}" stroke="#0a0f12" stroke-width="2"/>`,
       `<text x="${x + 11}" y="${y - 9}" font-size="12" font-weight="700" fill="#e7eef0">${esc(id)}${r.z ? ` <tspan fill="#8fa2a9" font-weight="400">z ${r.z}</tspan>` : ""}${gasHigh ? ` <tspan fill="#ff8a8c">GAS</tspan>` : ""}</text>`);
   });
@@ -2610,7 +3177,9 @@ function renderMap(){
     out.push(`<circle cx="${x}" cy="${y}" r="8" fill="${c}" stroke="#0a0f12" stroke-width="2" style="cursor:pointer"/>`,
       `<text x="${x + 12}" y="${y + 4}" font-size="13" font-weight="700" fill="#e7eef0">${esc(it.name)}${p.z ? ` <tspan fill="#8fa2a9" font-weight="400">z ${p.z} m</tspan>` : ""}</text>`);
   });
-  svgEl.innerHTML = `<defs><marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4c9bf0"/></marker></defs>` + out.join("");
+  svgEl.innerHTML = `<defs><marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4c9bf0"/></marker>
+    <marker id="arrA" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#f0b429"/></marker>
+    <marker id="arrG" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#35c47c"/></marker></defs>` + out.join("");
 }
 
 let msEdited = false;
@@ -2623,6 +3192,23 @@ $("#ms-save").onclick = async () => {
 async function resetPos(id){ await api("/api/positions/reset", {body_id: id}); toast("Position reset: the dot restarts at the hub.", "SAFE"); poll(); }
 function centerOn(id){ const p = S.positions[id]; if (!p) return; MV.tx = svgEl.clientWidth / 2 - p.x * MV.k; MV.ty = svgEl.clientHeight / 2 + p.y * MV.k; renderMap(); }
 async function setRepZ(id, v){ const reps = {...M.repeaters}; if (!reps[id]) return; reps[id] = {...reps[id], z: parseFloat(v) || 0}; saveMap({repeaters: reps}); }
+function repFaceGuess(r){                   // same rule as the hub: along the tunnel the repeater sits in
+  let best = null;
+  (M.tunnels || []).forEach(l => l.forEach((a, i) => { if (!i) return; const b = l[i - 1], dx = a[0] - b[0], dy = a[1] - b[1], L2 = dx*dx + dy*dy;
+    const t = L2 ? Math.max(0, Math.min(1, ((r.x - b[0]) * dx + (r.y - b[1]) * dy) / L2)) : 0, d = Math.hypot(r.x - b[0] - t * dx, r.y - b[1] - t * dy);
+    if (!best || d < best.d) best = {d, ang: (Math.atan2(a[0] - b[0], a[1] - b[1]) * 180 / Math.PI + 360) % 360}; }));
+  return best ? best.ang : 90;
+}
+async function setRepFace(id, v){ const reps = {...M.repeaters}; if (!reps[id]) return; reps[id] = {...reps[id], face: v === "" || v == null ? null : ((parseFloat(v) % 360) + 360) % 360}; saveMap({repeaters: reps}); }
+function flipRepFace(id){ const r = M.repeaters[id]; if (!r) return; setRepFace(id, ((r.face ?? repFaceGuess(r)) + 180) % 360); }
+async function renameExit(i){ const e = M.exits[i]; const n = (prompt("New name for this exit:", e.name) || "").trim(); if (!n) return;
+  saveMap({exits: M.exits.map((x, j) => j === i ? {...x, name: n} : x)}); }
+function delExit(i){ saveMap({exits: M.exits.filter((_, j) => j !== i)}); }
+async function evac(action, extra){ const r = await api("/api/evac", {action, ...(extra || {})});
+  if (!r.ok) return toast(esc(r.error || "failed"), "WARNING");
+  if (action === "start") toast("<b>EVACUATION STARTED.</b> Every buzzer sounds, every LED lights, and each exit sign shows the way out.", "DANGER");
+  if (action === "stop") toast("Evacuation ended. Signs back to normal.", "SAFE");
+  poll(); }
 
 function renderMapSide(){
   if (!M) syncMap(); if (!M) return;
@@ -2634,15 +3220,36 @@ function renderMapSide(){
     return (ids.length ? ids : ["REP-01"]).map(id => `<option value="${esc(id)}" ${id === cur ? "selected" : ""}>${esc(id)}${M.repeaters[id] ? " ✓" : ""}</option>`).join("");
   });
   if (!$("#m-hint").innerHTML) renderHint();
+  const EV = S.evac, nr = Object.keys(S.routes || {}).length;
+  const acked = S.repeaters.filter(r => r.online && r.gid === EV.guide_id && EV.active).length;
+  setIfChanged("#m-evac", JSON.stringify([EV.active, EV.hazards, EV.msg, (M.exits || []).length, nr, acked, Object.keys(EV.guide || {}).length]), () => {
+    $("#m-evac").classList.toggle("evac-on", EV.active);
+    const hz = (EV.hazards || []).map((h, i) => `<div class="mrep"><span>🔥 <b>${esc(h.why || "danger zone")}</b><br><span class="note mono">x ${f1(h.x)} y ${f1(h.y)} · r ${h.r} m</span></span><span></span>
+      <button class="btn small ghost" onclick="evac('remove_hazard', {i: ${i}})">Remove</button></div>`).join("");
+    if (EV.active) return `<h3 style="color:#ff8a8c">🚨 EVACUATION RUNNING</h3>
+      <div class="note">since ${esc(EV.since_clock || "")} · ${esc(EV.msg || "")}<br>Exit signs updated: <b>${acked}/${Object.keys(EV.guide || {}).length}</b> repeaters · ${nr} worker route(s)</div>
+      ${hz || '<div class="note">No danger zone marked — routes go to the nearest exit.</div>'}
+      <button class="btn small" onclick="setTool('hazard')">🔥 Add danger zone</button>
+      <button class="btn green bigbtn" onclick="if(confirm('End the evacuation and clear the danger zones?')) evac('stop')">End evacuation</button>`;
+    return `<h3>Emergency / evacuation</h3>
+      ${(M.exits || []).length ? "" : '<div class="note" style="color:var(--warn)">Mark at least one <b>🚪 Exit</b> on the map first.</div>'}
+      ${hz || '<div class="note">Mark the emergency spot with <b>🔥 Emergency</b> (optional), then start. Every worker gets a route to the nearest safe exit and every repeater sign points the way.</div>'}
+      <button class="btn red bigbtn" onclick="if(confirm('Start an EVACUATION? All buzzers sound and every worker is told to leave.')) evac('start', {msg: (prompt('Short reason (optional):', '') || '')})">START EVACUATION</button>`;
+  });
+  setIfChanged("#m-exits", JSON.stringify(M.exits || []), () => (M.exits || []).length ? M.exits.map((e, i) => `<div class="mrep"><span><b>🚪 ${esc(e.name)}</b><br><span class="note mono">x ${f1(e.x)} y ${f1(e.y)}</span></span>
+      <button class="btn small ghost" onclick="renameExit(${i})">Rename</button><button class="btn small ghost" onclick="delExit(${i})">Delete</button></div>`).join("")
+    : `<div class="note">No exits yet. Use <b>🚪 Exit</b> and click the shaft / adit / refuge chamber.</div>`);
   const items = mapItems(), now = Object.entries(S.positions);
   $("#m-workers").innerHTML = now.length ? now.map(([id, p]) => { const it = items[id] || {name: id, status: "NO DATA"};
     return `<div class="mw ${esc(it.status)}" onclick="centerOn('${esc(id)}')"><div class="t"><span>${esc(it.name)}</span><span class="pill ${statusCls(it.status)}">${esc(it.status)}</span></div>
       <small class="mono">x ${f1(p.x)} · y ${f1(p.y)} · z ${p.z == null ? "–" : f1(p.z)} m · ${Math.round(Math.hypot(p.x, p.y))} m from hub</small>
       <small>${esc(p.src)}${p.acc ? ` · ±${p.acc} m` : ""}${p.fix_rep ? ` · last check ${esc(p.fix_rep)} ${ago(p.fix_age)}` : ""}</small>
+      ${S.routes[id] ? `<span class="rtag ${S.routes[id].hazard ? "hz" : ""}">🚪 ${esc(S.routes[id].exit)} · ${S.routes[id].dist} m${S.routes[id].via.length ? " · via " + esc(S.routes[id].via.join(" → ")) : ""}${S.routes[id].hazard ? " · passes danger zone" : ""}</span>` : ""}
       ${p.pdr ? `<button class="btn small ghost" style="justify-self:start" onclick="event.stopPropagation();resetPos('${esc(id)}')">Reset to hub</button>` : ""}</div>`; }).join("")
     : `<div class="note">No worker on the map yet. Body units appear here once they send data — with a step sensor they start at the hub, without one they show next to their repeater (place it first). Try <b>▶ Demo walker</b>.</div>`;
-  setIfChanged("#m-reps", JSON.stringify([ids, M.repeaters, S.repeaters.map(r => [r.id, r.online])]), () => ids.length ? ids.map(id => { const r = M.repeaters[id], L = S.repeaters.find(x => x.id === id);
-    return `<div class="mrep"><span><b class="mono">${esc(id)}</b> <span class="note">${L ? (L.online ? "online" : "offline") : "not seen"}</span><br><span class="note mono">${r ? `x ${f1(r.x)} y ${f1(r.y)}` : "not on the map"}</span></span>
+  setIfChanged("#m-reps", JSON.stringify([ids, M.repeaters, S.repeaters.map(r => [r.id, r.online, r.sos])]), () => ids.length ? ids.map(id => { const r = M.repeaters[id], L = S.repeaters.find(x => x.id === id);
+    return `<div class="mrep"><span><b class="mono">${esc(id)}</b> <span class="note">${L ? (L.online ? "online" : "offline") : "not seen"}</span>${L && L.sos ? ' <span class="tag red">SOS</span>' : ""}<br><span class="note mono">${r ? `x ${f1(r.x)} y ${f1(r.y)}` : "not on the map"}</span>
+      ${r ? `<br><span class="note">→ <input type="number" step="15" value="${Math.round(r.face ?? repFaceGuess(r))}" style="width:62px" aria-label="${esc(id)} sign direction" onchange="setRepFace('${esc(id)}', this.value)">° <button class="btn small ghost" onclick="flipRepFace('${esc(id)}')" title="Flip the sign direction">⇄</button></span>` : ""}</span>
       ${r ? `<input type="number" step="1" value="${r.z || 0}" title="z (m)" aria-label="${esc(id)} height" onchange="setRepZ('${esc(id)}', this.value)">` : "<span></span>"}
       <button class="btn small ghost" onclick="$('#m-rep').value='${esc(id)}';setTool('repeater')">${r ? "Move" : "Place"}</button></div>`; }).join("")
     : `<div class="note">No repeaters seen yet.</div>`);
@@ -2657,9 +3264,9 @@ $("#g-save").onclick = async () => {
   await api("/api/gas", {model: $("#g-model").value, rl_k: $("#g-rl").value, vc: $("#g-vc").value, gas_alarm_mv: $("#g-limit").value});
   gasEdited = false; toast("Gas settings saved.", "SAFE"); poll();
 };
-async function calibrate(id){ const r = await api("/api/gas/calibrate", {repeater: id});
-  toast(r.ok ? `<b>${esc(id)}</b> calibrated: this air now counts as clean.` : esc(r.error), r.ok ? "SAFE" : "WARNING"); poll(); }
-const ppmTxt = v => v >= 10000 ? (v / 10000).toFixed(2) + " %" : v >= 100 ? Math.round(v) + " ppm" : v.toFixed(1) + " ppm";
+async function calibrate(id, ch){ const r = await api("/api/gas/calibrate", {repeater: id, ch: ch || 1});
+  toast(r.ok ? `<b>${esc(id)}</b> sensor ${ch || 1} calibrated: this air now counts as clean.` : esc(r.error), r.ok ? "SAFE" : "WARNING"); poll(); }
+const ppmTxt = (v, unit) => unit === "%" || v >= 10000 ? (v / 10000).toFixed(2) + " %" : v >= 100 ? Math.round(v) + " ppm" : v.toFixed(1) + " ppm";
 function airBlock(r){
   if (!("air_t" in r)) return "";                       // repeater firmware without the AHT code
   if (r.air_t == null) return `<div class="air"><div class="ah"><b>Air · AHT sensor</b><span class="pill NO">NO SENSOR</span></div>
@@ -2683,37 +3290,48 @@ function airBlock(r){
     ${(r.air_why || []).length ? `<div class="note" style="color:${lv === 2 ? "#ff8a8c" : "var(--warn)"}">${esc(r.air_why.join(" · "))}</div>` : ""}
     ${svg}</div>`;
 }
-function gasCard(r){
-  if (r.gas_mv == null) return `<div class="gcard ${["SAFE","WARNING","DANGER"][r.air_level || 0]}"><div class="head"><b class="mono" style="font-size:17px">${esc(r.id)}</b>
-      <span class="pill NO">NO GAS SENSOR</span></div>${r.online ? "" : '<div class="note"><b style="color:#ff8a8c">repeater offline</b></div>'}${airBlock(r)}</div>`;
-  const g = r.gas, lv = g ? Math.max(0, ...g.gases.filter(q => q.main).map(q => q.level)) : 0;
-  const high = lv === 2 || r.gas_local || r.gas_mv >= S.limits.gas_alarm_mv;
-  const st = r.gas_missing ? "OFF" : high ? "DANGER" : lv === 1 ? "WARNING" : "SAFE";
-  const label = r.gas_missing ? "NO SENSOR" : r.gas_warm ? "WARMING UP" : st;
-  const d = (r.gas_spark || []), top = Math.max(S.limits.gas_alarm_mv * 1.1, ...d, 1);
+function gasChannel(r, c){                  // one MQ sensor of one repeater
+  const g = c.ana, lv = g ? Math.max(0, ...g.gases.filter(q => q.main).map(q => q.level)) : 0;
+  const high = lv === 2 || c.local || (!c.warm && c.mv >= S.limits.gas_alarm_mv);
+  const st = c.missing ? "OFF" : high ? "DANGER" : lv === 1 ? "WARNING" : "SAFE";
+  const label = c.missing ? "NO SENSOR" : c.warm ? "WARMING UP" : st;
+  const d = c.spark || [], top = Math.max(S.limits.gas_alarm_mv * 1.1, ...d, 1);
   const pts = d.map((v, i) => `${(i / Math.max(d.length - 1, 1) * 100).toFixed(1)},${(44 - v / top * 40).toFixed(1)}`).join(" ");
-  const body = r.gas_missing ? `<div class="note">No gas sensor on this repeater (or not wired). Connect AO through the 10k/20k divider.</div>`
-    : r.gas_warm ? `<div class="note"><span class="spin"></span>Sensor heater warming up (about 1 minute after power-on).</div>`
+  const model = (S.gas_cfg.models || {})[String(c.ch)] || S.gas_cfg.model;
+  const body = c.missing ? `<div class="note">No sensor on this channel (or not wired). Connect AO through the 10k/20k divider.</div>`
+    : c.warm ? `<div class="note"><span class="spin"></span>Sensor heater warming up (about 1 minute after power-on).</div>`
     : !g || !g.cal ? `<div class="note"><span class="spin"></span>Learning the clean-air level… (about 12 readings after warm-up). Keep the sensor in clean air.</div>`
-    : g.gases.map(q => `<div class="grow" style="${q.main ? "" : "opacity:.6"}"><span>${esc(q.name)}${q.name !== q.key ? ` <span class="note">${esc(q.key)}</span>` : ""}</span><span class="v ${q.level ? "l" + q.level : ""}">${ppmTxt(q.ppm)}</span>
+    : g.gases.map(q => `<div class="grow" style="${q.main ? "" : "opacity:.6"}"><span>${esc(q.name)}${q.name !== q.key ? ` <span class="note">${esc(q.key)}</span>` : ""}</span><span class="v ${q.level ? "l" + q.level : ""}">${ppmTxt(q.ppm, q.unit)}</span>
         <div class="gbar"><i class="${q.level ? "l" + q.level : ""}" style="width:${Math.min(100, Math.max(1.5, q.ppm / q.danger * 100)).toFixed(1)}%"></i></div>
-        <small>${q.main ? `warning ${ppmTxt(q.warn)} · danger ${ppmTxt(q.danger)}` : "side reading (sensor not made for this gas) · info only, no alarm"}</small></div>`).join("");
-  const cardSt = ["SAFE", "WARNING", "DANGER"].indexOf(st) < (r.air_level || 0) ? ["SAFE", "WARNING", "DANGER"][r.air_level] : st;
-  return `<div class="gcard ${cardSt}"><div class="head"><b class="mono" style="font-size:17px">${esc(r.id)}</b>
+        <small>${q.main ? `warning ${ppmTxt(q.warn, q.unit)} · danger ${ppmTxt(q.danger, q.unit)}` : "side reading (sensor not made for this gas) · info only, no alarm"}</small></div>`).join("");
+  return `<div class="gch" style="border-top:1px solid var(--line);padding-top:8px;display:grid;gap:6px">
+    <div style="display:flex;justify-content:space-between;align-items:center"><b>Sensor ${c.ch} · ${esc(g ? g.model : (c.ch === 1 ? S.gas_cfg.model : model))}</b>
       <span class="pill ${st === "OFF" ? "NO" : st}">${label}</span></div>
-    <div class="note">${esc(g ? g.model + " · " + g.note : "")}${r.online ? "" : ' · <b style="color:#ff8a8c">repeater offline</b>'}</div>
+    ${g ? `<div class="note">${esc(g.note)}</div>` : ""}
     ${body}
-    ${r.gas_missing ? "" : `<div class="graw"><span>Sensor output <b>${r.gas_mv} mV</b></span><span>Rs <b>${g && g.rs != null ? g.rs + " kΩ" : "–"}</b></span><span>Rs/R0 <b>${g && g.ratio != null ? g.ratio : "–"}</b></span></div>
-    ${d.length > 1 ? `<svg viewBox="0 0 100 46" preserveAspectRatio="none" aria-label="Sensor output, last readings"><line x1="0" x2="100" y1="${(44 - S.limits.gas_alarm_mv / top * 40).toFixed(1)}" y2="${(44 - S.limits.gas_alarm_mv / top * 40).toFixed(1)}" stroke="#f0b42999" stroke-dasharray="3 3" stroke-width="1" vector-effect="non-scaling-stroke"/>
+    ${c.missing ? "" : `<div class="graw"><span>Output <b>${c.mv} mV</b></span><span>Rs <b>${g && g.rs != null ? g.rs + " kΩ" : "–"}</b></span><span>Rs/R0 <b>${g && g.ratio != null ? g.ratio : "–"}</b></span></div>
+    ${d.length > 1 ? `<svg viewBox="0 0 100 46" preserveAspectRatio="none" aria-label="Sensor ${c.ch} output, last readings"><line x1="0" x2="100" y1="${(44 - S.limits.gas_alarm_mv / top * 40).toFixed(1)}" y2="${(44 - S.limits.gas_alarm_mv / top * 40).toFixed(1)}" stroke="#f0b42999" stroke-dasharray="3 3" stroke-width="1" vector-effect="non-scaling-stroke"/>
       <polyline points="${pts}" fill="none" stroke="${high ? "#ff4d4f" : "#4c9bf0"}" stroke-width="1.8" vector-effect="non-scaling-stroke"/></svg>` : ""}
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span class="note">${g && g.cal ? `R0 ${g.cal.how === "auto" ? "auto-learned" : "calibrated"} at ${esc(g.cal.time)}` : ""}</span>
-      ${r.gas_warm ? "" : `<button class="btn small" onclick="calibrate('${esc(r.id)}')">Calibrate in clean air</button>`}</div>`}
+      ${c.warm ? "" : `<button class="btn small" onclick="calibrate('${esc(r.id)}', ${c.ch})">Calibrate in clean air</button>`}</div>`}</div>`;
+}
+function gasCard(r){
+  const chs = r.gas_chs || [], lv = r.gas_level || 0;
+  const st = chs.length && chs.every(c => c.missing) && !r.direct ? "OFF" : ["SAFE", "WARNING", "DANGER"][lv];
+  const cardSt = ["SAFE", "WARNING", "DANGER"][Math.max(lv, r.air_level || 0)];
+  const direct = r.direct ? Object.entries(r.direct).map(([k, v]) => `<div class="grow"><span>${esc((S.gas_limits[k] || {}).name || k)}</span><span class="v">${v} ${esc((S.gas_limits[k] || {}).unit || "")}</span></div>`).join("") : "";
+  return `<div class="gcard ${cardSt}"><div class="head"><b class="mono" style="font-size:17px">${esc(r.id)}</b>
+      <span class="pill ${!chs.length ? "NO" : st === "OFF" ? "NO" : st}">${!chs.length ? "NO GAS SENSOR" : st === "OFF" ? "NO SENSOR" : st}</span></div>
+    ${r.online ? "" : '<div class="note"><b style="color:#ff8a8c">repeater offline</b></div>'}
+    ${r.sos ? '<div class="note"><b style="color:#ff8a8c">SOS button pressed at this repeater</b></div>' : ""}
+    ${(r.gas_why || []).length ? `<div class="note" style="color:${lv === 2 ? "#ff8a8c" : "var(--warn)"}">${esc(r.gas_why.join(" · "))}</div>` : ""}
+    ${chs.map(c => gasChannel(r, c)).join("")}${direct}
     ${airBlock(r)}
   </div>`;
 }
 function renderGas(){
-  const reps = S.repeaters.filter(r => r.gas_mv != null || "air_t" in r);
-  const anyHigh = reps.some(r => r.air_level === 2) || reps.some(r => r.gas_mv != null && !r.gas_missing && ((r.gas && r.gas.gases.some(q => q.main && q.level === 2)) || r.gas_local || r.gas_mv >= S.limits.gas_alarm_mv));
+  const reps = S.repeaters.filter(r => r.gas_mv != null || "air_t" in r || (r.gas_chs || []).length);
+  const anyHigh = reps.some(r => r.air_level === 2 || r.gas_level === 2);
   $("#n-gas").hidden = !anyHigh;
   if (!$("#v-gas").classList.contains("on")) return;
   setIfChanged("#g-model", JSON.stringify(S.gas_models), () => S.gas_models.map(m => `<option>${esc(m)}</option>`).join(""));
@@ -2724,6 +3342,43 @@ function renderGas(){
   $("#gascards").innerHTML = reps.length ? reps.map(gasCard).join("")
     : `<div class="empty">No gas or air readings yet. Repeater firmware with <span class="mono">GAS_ENABLED 1</span> reports its MQ sensor here, and <span class="mono">AHT_ENABLED 1</span> its air temperature + humidity.</div>`;
 }
+
+
+/* ================= LIMITS ================= */
+let limEdited = false, limDrawn = false;
+document.addEventListener("input", e => { if (e.target.closest("#v-limits")) limEdited = true; });
+const BODY_LIMITS = [["temp_warn_hi", "Body temp warning (°C)"], ["temp_danger_hi", "Body temp danger (°C)"], ["temp_warn_lo", "Body temp too low (°C)"],
+  ["hr_warn_lo", "Heart rate warning below"], ["hr_warn_hi", "Heart rate warning above"], ["hr_danger_lo", "Heart rate danger below"], ["hr_danger_hi", "Heart rate danger above"],
+  ["spo2_warn", "SpO₂ warning (%)"], ["spo2_danger", "SpO₂ danger (%)"], ["signal_warn_s", "No signal: warning (s)"], ["signal_danger_s", "No signal: danger (s)"]];
+const AIR_LIMITS = [["wb_warn", "Wet-bulb warning (°C)"], ["wb_danger", "Wet-bulb danger (°C)"], ["air_temp_warn", "Air temp warning (°C)"],
+  ["air_temp_danger", "Air temp danger (°C)"], ["air_hum_warn", "Humidity warning (%)"], ["gas_alarm_mv", "Backup gas alarm (sensor mV)"]];
+function renderLimits(force){
+  if (!S || !$("#v-limits").classList.contains("on")) return;
+  if (limDrawn && !force) return;             // draw once per visit, so typing is never overwritten
+  if (force && limEdited) return;
+  limDrawn = true;
+  const G = S.gas_limits;
+  $("#lim-gas").innerHTML = `<thead><tr><th>Gas</th><th>Unit</th><th>Warning</th><th>Danger</th><th>Alarm</th><th>Standard / source</th></tr></thead><tbody>` +
+    (S.gas_order || Object.keys(G)).map(k => [k, G[k]]).map(([k, g]) => `<tr data-k="${esc(k)}"><td><b>${esc(g.name)}</b> <span class="note mono">${esc(k)}</span></td><td>${g.unit === "%" ? "% vol" : "ppm"}${g.low ? " <small>(low = bad)</small>" : ""}</td>
+      <td><input type="number" step="any" class="lw" value="${g.warn}"></td><td><input type="number" step="any" class="ld" value="${g.danger}"></td>
+      <td><input type="checkbox" class="la" ${g.alarm ? "checked" : ""} aria-label="Alarm for ${esc(g.name)}"></td><td><small>${esc(g.src || "")}</small></td></tr>`).join("") + `</tbody>`;
+  const opts = cur => S.gas_models.map(m => `<option ${m === cur ? "selected" : ""}>${esc(m)}</option>`).join("");
+  $("#lim-m1").innerHTML = opts(S.gas_cfg.model); $("#lim-m2").innerHTML = opts((S.gas_cfg.models || {})["2"]); $("#lim-m3").innerHTML = opts((S.gas_cfg.models || {})["3"]);
+  $("#lim-mnote").innerHTML = S.gas_models.map(m => `<b>${esc(m)}</b>: ${esc(S.gas_model_notes[m] || "")}`).join("<br>");
+  $("#lim-auto").checked = !!S.evac.cfg.auto_gas; $("#lim-rad").value = S.evac.cfg.radius_m;
+  const grid = list => list.map(([k, t]) => `<label>${t}<input type="number" step="any" data-l="${k}" value="${S.limits[k]}"></label>`).join("");
+  $("#lim-body").innerHTML = grid(BODY_LIMITS); $("#lim-air").innerHTML = grid(AIR_LIMITS);
+}
+$("#lim-save").onclick = async () => {
+  const gas = {}; document.querySelectorAll("#lim-gas tr[data-k]").forEach(tr => gas[tr.dataset.k] = {warn: tr.querySelector(".lw").value, danger: tr.querySelector(".ld").value, alarm: tr.querySelector(".la").checked});
+  const limits = {}; document.querySelectorAll("#v-limits [data-l]").forEach(i => limits[i.dataset.l] = i.value);
+  const r = await api("/api/limits", {gas, limits, evac: {auto_gas: $("#lim-auto").checked, radius_m: $("#lim-rad").value}});
+  if (!r.ok) return toast(esc(r.error || "Could not save"), "WARNING");
+  await api("/api/gas", {model: $("#lim-m1").value, model2: $("#lim-m2").value, model3: $("#lim-m3").value});
+  limEdited = false; toast("Limits saved. New readings are checked against them straight away.", "SAFE"); await poll(); renderLimits(true);
+};
+$("#lim-reset").onclick = async () => { if (!confirm("Put every gas limit back to the standard values?")) return;
+  await api("/api/limits", {gas_reset: true}); limEdited = false; await poll(); renderLimits(true); toast("Gas limits reset to the standard values.", "SAFE"); };
 
 /* ---------- alerts ---------- */
 function sendAlert(target){
