@@ -8,7 +8,7 @@ Schematics are generated from `docs/wiring/make_schematics.py` (run it after cha
 ## Body unit
 ![Body unit schematic](wiring/body_unit.svg)
 
-## Body unit
+## Body unit — other boards (ESP32-S3 / XIAO C6)
 
 | Connection | ESP32-S3 | XIAO ESP32-C6 |
 |---|---|---|
@@ -81,6 +81,9 @@ A temperature-only demo worker. Flash `body_node` with `BODY_ID "BODY-02"`, `MOC
 The hub shows its temperature and gives no motion-sensor warning (flag `BF_NO_MOTION = 512`).
 
 ## Entry station / scanning system (ESP32-C6)
+
+![Entry station schematic](wiring/entry_station.svg)
+
 From v3.2 the scanning system runs on an **ESP32-C6** (no camera — the entry photo is taken on the phone page `http://<laptop-ip>:5000/phone` and matched with the scanned tags on the hub). Check it first with `firmware/tests/entry_hw_test`.
 
 | Connection | ESP32-C6-WROOM-1 DevKit | XIAO ESP32-C6 |
@@ -98,8 +101,6 @@ From v3.2 the scanning system runs on an **ESP32-C6** (no camera — the entry p
 Libraries: *Adafruit PN532*, *Adafruit SSD1306*, *Adafruit GFX* (+ *Adafruit BusIO*).
 
 ## Entry station (XIAO ESP32-S3 Sense, earlier V3 option with camera)
-
-![Entry station schematic](wiring/entry_station.svg)
 
 | Connection | XIAO S3 Sense | (XIAO C6, no camera) |
 |---|---|---|
