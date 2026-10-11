@@ -56,3 +56,9 @@ Three fake repeaters (each with 3 gas sensors + AHT) and three workers appear; w
 - Automatic: a gas at its danger level starts the evacuation (if switched on) with that repeater's area as the danger zone.
 - By hand: **Map → 🔥 Emergency** → click the spot → **START EVACUATION**.
 - Every buzzer beeps, every body LED lights, every repeater sign shows the arrow and distance to the nearest safe exit, and the map draws each worker's route. **End evacuation** when everyone is out.
+
+## Can it run straight from GitHub?
+No. GitHub (and GitHub Pages) only stores files / serves static pages — it cannot run the Python admin hub, and the repeaters must reach the hub over the same hotspot anyway. Use GitHub only to get the code (`git clone` or *Code → Download ZIP*), then run it on the laptop. Shortcut: double-click `hub\start_admin.bat`.
+
+## Demo map
+`tools/demo_map/` has a fictional mine plan plus a ready `map.json` (see its README) so the Map tab can be tested before the real plan is available.
