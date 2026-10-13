@@ -138,15 +138,15 @@ Full steps: [docs/setup.md](docs/setup.md) · Wiring + schematics: [docs/wiring.
 
 ## Screenshots
 
-Opening screen of the control room (press **Get started** or Enter):
+Every page of the control-room website: **[docs/website.md](docs/website.md)**. Reports: **[docs/report](docs/report/)** (blue book + figures).
 
-![Splash](docs/images/splash.png)
+| Evacuation map | Live |
+|---|---|
+| ![Evacuation map](docs/images/website/map_evac.png) | ![Live](docs/images/website/live_evac.png) |
+| **Gas limits** | **Body unit display (v3.4)** |
+| ![Limits](docs/images/website/limits.png) | ![OLED](docs/images/body_oled_screens.png) |
 
-| Live | Gas & air | Worker panel |
-|---|---|---|
-| ![Live](docs/images/live.png) | ![Gas](docs/images/gas.png) | ![Worker](docs/images/worker_panel.png) |
-
-*Screens from a test run with simulated workers.*
+*Screens from a test run with the demo mine map, the repeater simulator and fictional demo workers.*
 
 ## Bill of materials
 
