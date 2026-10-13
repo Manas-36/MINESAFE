@@ -161,26 +161,26 @@ def mcu(s, x, y, w, h, title, sub, left, right):
 
 # ===================================================================== body
 def body():
-    s = Sheet(1560, 940, "Body unit — wiring schematic",
-              "Worn by the miner · ESP32-C6-WROOM-1 DevKit (board: ESP32C6 Dev Module) · all sensors on 3.3 V · S3 / XIAO C6 pins in the firmware")
-    P = mcu(s, 190, 150, 260, 600, "ESP32-C6-WROOM-1", "DevKit · on-board PCB antenna",
+    s = Sheet(1820, 1080, "Body unit v3.4 — wiring schematic",
+              "Worn by the miner · ESP32-C6-WROOM-1 DevKit (board: ESP32C6 Dev Module) · all on 3.3 V · OLED display + vibration motor · S3 / XIAO C6 pins in the firmware")
+    P = mcu(s, 190, 150, 260, 660, "ESP32-C6-WROOM-1", "DevKit · on-board PCB antenna",
             left=[(110, "3V3"), (200, "5V (USB)"), (540, "GND")],
             right=[(130, "GPIO6  SDA"), (170, "GPIO7  SCL"), (300, "GPIO10  1-Wire"),
-                   (380, "GPIO2  ADC"), (460, "GPIO18"), (530, "GPIO19")])
+                   (380, "GPIO2  ADC"), (460, "GPIO18"), (530, "GPIO19"), (620, "GPIO20  PWM")])
     x3, y3 = P["3V3"]; s.wire([(x3, y3), (x3 - 30, y3), (x3 - 30, y3 - 30)], "3V3"); s.vcc(x3 - 30, y3 - 30)
     x5, y5 = P["5V (USB)"]; s.wire([(x5, y5), (x5 - 30, y5)], "5V"); s.text(x5 - 34, y5 + 22, "USB / power bank", 11, MUTED, "end")
     s.text(x5 - 34, y5 + 37, "(Li-ion + charger in V4)", 11, MUTED, "end", italic=True)
     xg, yg = P["GND"]; s.wire([(xg, yg), (xg - 30, yg), (xg - 30, yg + 20)], "GND"); s.gnd(xg - 30, yg + 20)
 
     sda_y, scl_y = P["GPIO6  SDA"][1], P["GPIO7  SCL"][1]
-    bus_end = 1300
+    bus_end = 1580
     s.wire([P["GPIO6  SDA"], (bus_end, sda_y)], "SDA", 3)
     s.wire([P["GPIO7  SCL"], (bus_end, scl_y)], "SCL", 3)
     s.text(bus_end + 8, sda_y + 4, "SDA", 12, NET["SDA"], weight=700)
     s.text(bus_end + 8, scl_y + 4, "SCL", 12, NET["SCL"], weight=700)
-    s.text(1000, scl_y + 22, "I²C bus · shared by 3 sensors (all in parallel)", 12, MUTED, weight=600)
+    s.text(1240, scl_y + 22, "I²C bus · 3 sensors + OLED, all in parallel", 12, MUTED, weight=600)
     mods = [(560, "MPU6050 (GY-521)", "accel + gyro · 0x68"), (820, "BMP180", "pressure / height · 0x77"),
-            (1080, "MAX30100 / 30102", "heart rate + SpO₂ · 0x57")]
+            (1080, "MAX30100 / 30102", "heart rate + SpO₂ · 0x57"), (1340, "SSD1306 OLED", "0.96\" 128×64 · 0x3C")]
     for mx, t, sub in mods:
         my, mw, mh = 138, 190, 96
         s.box(mx, my, mw, mh, t, sub, dash=(mx == 1080))
@@ -206,7 +206,7 @@ def body():
     s.vcc(640, y7 - 90)
     s.wire([(940, y7 - 55), (940, y7 - 75)], "3V3"); s.vcc(940, y7 - 75)
     s.wire([(1040, y7 + 20), (1080, y7 + 20)], "GND"); s.gnd(1080, y7 + 20)
-    s.text(660, y7 + 26, "red → 3V3 · black → GND · yellow → GPIO10", 11, MUTED)
+    s.text(500, y7 + 26, "probe: red → 3V3 · black → GND · yellow → GPIO10", 11, MUTED)
 
     y1 = P["GPIO2  ADC"][1]
     s.box(1140, y1 - 55, 200, 110, "HW-827 pulse", "analog heart-rate sensor")
@@ -226,14 +226,30 @@ def body():
     e2 = s.led(end[0], y4, "Alert LED (red)")
     s.wire([e2, (e2[0] + 40, y4), (e2[0] + 40, y4 + 14)], "GND"); s.gnd(e2[0] + 40, y4 + 14)
 
-    s.note(1050, 640, ["Notes",
+    # vibration motor through an NPN transistor
+    yh = P["GPIO20  PWM"][1]
+    end = s.resistor(P["GPIO20  PWM"][0], yh, 160, False, "1 kΩ", "SIG")
+    s.wire([end, (640, yh)], "SIG")
+    s.box(640, yh - 34, 170, 92, "NPN transistor", "S8050 / BC547 / 2N2222")
+    s.pin(640, yh, "B", "l"); s.pin(760, yh - 34, "C", "t"); s.pin(760, yh + 58, "E", "b")
+    s.wire([(760, yh + 58), (760, yh + 70)], "GND"); s.gnd(760, yh + 70)
+    s.box(900, yh - 150, 210, 74, "Vibration motor", "coin 10 mm · 3 V · ~80 mA")
+    s.pin(950, yh - 76, "−", "b"); s.pin(1060, yh - 150, "+", "t")
+    s.wire([(760, yh - 34), (760, yh - 56), (950, yh - 56), (950, yh - 76)], "SIG")
+    s.wire([(1060, yh - 150), (1060, yh - 166)], "3V3"); s.vcc(1060, yh - 166)
+    s.text(1130, yh - 122, "1N4148 diode across the motor:", 11.5, INK, weight=700)
+    s.text(1130, yh - 104, "stripe (cathode) to +, other end to −", 11.5, MUTED)
+    s.text(840, yh + 22, "or a ready vibration-motor module:", 11.5, INK, weight=700)
+    s.text(840, yh + 40, "IN → GPIO20 · VCC → 3V3 · GND → GND", 11.5, MUTED)
+
+    s.note(1240, 760, ["Notes",
                        "• All sensor boards on 3V3 — never 5 V on the ESP pins.",
                        "• Avoid GPIO8 (RGB LED), 9 (BOOT), 4/5/15 (strapping),",
                        "  12/13 (USB). Only GPIO0–6 read analog on the C6.",
                        "• Check first with firmware/tests/body_sensor_test.",
                        "• Keep still 3 s at power-on (gyro calibration).",
                        "• Dashed = optional part."], 470)
-    s.legend(190, 900, [("3V3", "3.3 V"), ("5V", "5 V"), ("GND", "Ground"), ("SDA", "I²C SDA"), ("SCL", "I²C SCL"),
+    s.legend(190, 1040, [("3V3", "3.3 V"), ("5V", "5 V"), ("GND", "Ground"), ("SDA", "I²C SDA"), ("SCL", "I²C SCL"),
                         ("ONE", "1-Wire data"), ("ANA", "Analog"), ("SIG", "Digital I/O")])
     s.save("body_unit.svg")
 

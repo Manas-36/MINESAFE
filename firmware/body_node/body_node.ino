@@ -4,7 +4,8 @@
 //          Tools -> Board: "ESP32S3 Dev Module"  or  "XIAO_ESP32C6"
 //          Tools -> USB CDC On Boot: Enabled
 //  Radio : ESP-NOW only (no WiFi network, no password) -> nearest repeater(s)
-//  No extra libraries needed - every sensor driver is inside this file.
+//  Libraries: only for the OLED display - "Adafruit SSD1306" + "Adafruit GFX" (Library Manager).
+//             Every sensor driver is inside this file. No display? set DISPLAY_ENABLED 0.
 //
 //  SENSORS (all optional - whatever is connected is found at power-on and listed
 //  on the Serial Monitor; a missing sensor is reported to the admin page)
@@ -13,6 +14,9 @@
 //    DS18B20 waterproof probe   : body (skin) temperature
 //    MAX30100 / MAX30102 board  : heart rate + SpO2 (estimate)
 //    HW-827 pulse sensor        : heart rate (used only if no MAX3010x is found)
+//  OUTPUTS (v3.4)
+//    SSD1306 0.96" OLED (I2C 0x3C, same bus) : vitals, link, EVACUATE + exit direction, SOS / fall prompts
+//    Coin vibration motor (via transistor or driver module) : alert, evacuation, fall, SOS feedback
 //
 //  WIRING                         ESP32-S3        XIAO ESP32-C6
 //    I2C SDA  (MPU6050, BMP180, MAX30100 - all in parallel)
@@ -27,6 +31,10 @@
 //                                 GPIO5           D8
 //    Red LED (+) via 220 ohm -> pin, LED (-) -> GND
 //                                 GPIO6           D10
+//    OLED  VCC -> 3V3, GND, SDA/SCL on the same I2C bus as the sensors
+//    Vibration motor: driver module IN -> pin (VCC 3V3, GND), or bare motor through an NPN
+//    transistor (1k base resistor, 1N4148 diode across the motor)
+//                                 GPIO10          D9 (GPIO20)      C6 DevKit: GPIO20
 //
 //  WEAR IT: chest strap / belt, upright, then switch on and stand still for 3 s while
 //  the red LED is on (the gyro learns its zero). The worker starts at the hub on the map.
@@ -35,6 +43,10 @@
 //          means "I am OK" and clears it.
 //  LED:    solid = ALERT from the admin   fast blink = SOS / fall alarm
 //          short blink every 2 s = searching for a repeater   off = all normal
+//  VIBRATION: 3 pulses every few s = ALERT / EVACUATE     long pulses = fall / no movement (press = I'm OK)
+//          2 short = still for a while (move or press)    1 long = SOS sent   2 short = SOS cancelled
+//          3 quick = lost the repeaters                   1 short = connected / exit direction changed
+//  SERIAL: 'v' = vibration test   'd' = show every display screen once
 // =====================================================================
 
 #include <WiFi.h>
@@ -92,6 +104,13 @@ const char* BODY_ID = "BODY-01";      // must match the "Body ESP code" on the a
 
 #define USE_EXTERNAL_ANTENNA 0        // XIAO ESP32-C6 only: 1 = antenna on the u.FL socket (fit it first!)
 
+#define DISPLAY_ENABLED      1        // 1 = 0.96" SSD1306 OLED 128x64 on the sensor I2C bus (skipped if not found)
+#define DISPLAY_ADDR         0x3C     // 0x3C on most boards (some are 0x3D)
+#define DISPLAY_FLIP         0        // 1 = turn the picture upside down
+#define HAPTIC_ENABLED       1        // 1 = vibration motor
+#define HAPTIC_STRENGTH      255      // 0-255 (PWM duty) - lower it if the motor is too strong / too loud
+#define HAPTIC_PIN_CUSTOM    -1       // -1 = default pin below
+
 #if CONFIG_IDF_TARGET_ESP32C6 && !defined(ARDUINO_XIAO_ESP32C6)
                                       // ESP32-C6-WROOM-1 DevKit (Tools -> Board: "ESP32C6 Dev Module")
   #define I2C_SDA      6              // MPU6050 + BMP180 + MAX3010x
@@ -100,6 +119,7 @@ const char* BODY_ID = "BODY-01";      // must match the "Body ESP code" on the a
   #define PULSE_PIN    2              // HW-827 S (analog: only GPIO0-6 on the C6)
   #define BUTTON_PIN   18             // to GND
   #define LED_PIN      19             // 220R to LED
+  #define HAPTIC_PIN   20             // vibration motor driver IN
 #elif CONFIG_IDF_TARGET_ESP32C6       // Seeed XIAO ESP32-C6
   #define I2C_SDA      22             // D4
   #define I2C_SCL      23             // D5
@@ -107,6 +127,7 @@ const char* BODY_ID = "BODY-01";      // must match the "Body ESP code" on the a
   #define PULSE_PIN    0              // D0 (HW-827 analog)
   #define BUTTON_PIN   19             // D8
   #define LED_PIN      18             // D10
+  #define HAPTIC_PIN   20             // D9
 #else                                 // ESP32-S3
   #define I2C_SDA      8
   #define I2C_SCL      9
@@ -114,6 +135,15 @@ const char* BODY_ID = "BODY-01";      // must match the "Body ESP code" on the a
   #define PULSE_PIN    4              // HW-827 analog (ADC1)
   #define BUTTON_PIN   5
   #define LED_PIN      6
+  #define HAPTIC_PIN   10
+#endif
+#if HAPTIC_PIN_CUSTOM >= 0
+  #undef  HAPTIC_PIN
+  #define HAPTIC_PIN  HAPTIC_PIN_CUSTOM
+#endif
+#if DISPLAY_ENABLED
+  #include <Adafruit_GFX.h>
+  #include <Adafruit_SSD1306.h>
 #endif
 #if I2C_SDA_CUSTOM >= 0 && I2C_SCL_CUSTOM >= 0
   #undef  I2C_SDA
@@ -186,7 +216,16 @@ struct __attribute__((packed)) MsBeacon {       // repeater -> everyone
   uint8_t  level;
   char     target[10];
 };
-struct BeaconRx { MsBeacon b; int8_t rssi; };
+// evacuation guide, appended to repeater beacons from v3.3 (same as repeater_node.ino)
+struct __attribute__((packed)) GuideEntry { uint8_t rep, code; uint16_t dist; };   // dist in metres
+struct __attribute__((packed)) MsGuideHdr { char tag[2]; uint32_t id; uint8_t evac, n; };
+#define GUIDE_MAX 40
+enum : uint8_t { G_NONE = 0, G_LEFT = 1, G_RIGHT = 2, G_UP = 3, G_HERE = 4, G_NOWAY = 5, G_DANGER = 0x10 };
+struct BeaconRx {
+  MsBeacon b; int8_t rssi;
+  bool hasGuide; uint32_t gid; uint8_t gevac, gn;
+  GuideEntry g[GUIDE_MAX];
+};
 // heart beat finder: works on any pulse waveform (MAX3010x light, HW-827 voltage)
 struct Beat {
   float sign = 1, minAmp = 20;
@@ -208,9 +247,20 @@ uint32_t lastBeaconAt = 0, lastHopAt = 0, txFail = 0;
 
 void onEspNowRecv(const esp_now_recv_info_t* info, const uint8_t* data, int len) {
   if (len < (int)sizeof(MsBeacon) || data[0] != 'M' || data[1] != 'S' || data[2] != MS_VER || data[3] != MS_BEACON) return;
-  BeaconRx r;
+  static BeaconRx r;                             // static: too big for the Wi-Fi task stack
   memcpy(&r.b, data, sizeof(MsBeacon));
   r.rssi = info->rx_ctrl ? info->rx_ctrl->rssi : -100;
+  r.hasGuide = false;
+  int gl = len - (int)sizeof(MsBeacon);
+  if (gl >= (int)sizeof(MsGuideHdr)) {
+    MsGuideHdr h;
+    memcpy(&h, data + sizeof(MsBeacon), sizeof(h));
+    uint8_t n = h.n > GUIDE_MAX ? GUIDE_MAX : h.n;
+    if (h.tag[0] == 'G' && h.tag[1] == 'D' && gl >= (int)(sizeof(h) + n * sizeof(GuideEntry))) {
+      r.hasGuide = true; r.gid = h.id; r.gevac = h.evac; r.gn = n;
+      memcpy(r.g, data + sizeof(MsBeacon) + sizeof(h), n * sizeof(GuideEntry));
+    }
+  }
   xQueueSend(rxQueue, &r, 0);
 }
 
@@ -220,7 +270,7 @@ void setChannel(uint8_t ch) {
 }
 
 bool radioBegin() {
-  rxQueue = xQueueCreate(16, sizeof(BeaconRx));
+  rxQueue = xQueueCreate(8, sizeof(BeaconRx));
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
   esp_wifi_set_ps(WIFI_PS_NONE);                 // keep the receiver awake
@@ -239,6 +289,7 @@ void channelSearch(uint32_t now) {
   if (locked && now - lastBeaconAt > LOST_MS) {
     locked = false;
     Serial.println("Lost the repeaters - searching channels...");
+    hapticEvent(5);
   }
   if (!locked && now - lastHopAt > SCAN_DWELL_MS) {
     lastHopAt = now;
@@ -713,12 +764,23 @@ uint32_t lastAlertId = 0;
 uint8_t  nearRep = 0;
 int8_t   nearRssi = -127;
 uint32_t nearAt = 0;
+uint32_t guideId = 0;                    // evacuation guide from the hub (through the repeaters)
+bool     guideEvac = false;
+uint8_t  guideN = 0;
+GuideEntry guideTab[GUIDE_MAX];
+uint32_t alertSince = 0;
+void hapticEvent(uint8_t ev);            // (defined further down)
 
 void handleBeacons(uint32_t now) {
-  BeaconRx r;
+  static BeaconRx r;
   while (xQueueReceive(rxQueue, &r, 0) == pdTRUE) {
     if (r.b.hop >= 255) continue;                           // repeater without a route
-    if (!locked) Serial.printf("Connected: repeater REP-%02u found on channel %u\n", r.b.rep, channel);
+    if (r.hasGuide && r.gid > guideId) {
+      guideId = r.gid; guideEvac = r.gevac; guideN = r.gn;
+      memcpy(guideTab, r.g, guideN * sizeof(GuideEntry));
+      Serial.printf("Evacuation guide %lu: %s\n", (unsigned long)guideId, guideEvac ? "EVACUATE" : "normal");
+    }
+    if (!locked) { Serial.printf("Connected: repeater REP-%02u found on channel %u\n", r.b.rep, channel); hapticEvent(4); }
     locked = true;
     lastBeaconAt = now;
     if (r.b.espCh && r.b.espCh != channel) setChannel(r.b.espCh);
@@ -733,6 +795,7 @@ void handleBeacons(uint32_t now) {
     bool want = r.b.level && (strcmp(target, "*") == 0 || strcasecmp(target, BODY_ID) == 0);
     if (want != alertOn) {
       alertOn = want;
+      if (alertOn) alertSince = now;
       Serial.println(alertOn ? "\n*** ALERT FROM ADMIN - LEAVE THE AREA / FOLLOW INSTRUCTIONS ***\n"
                              : "Alert cleared by admin");
     }
@@ -802,9 +865,11 @@ bool handleButton(uint32_t now) {
       if (fallActive || noMotion) {
         fallActive = false; noMotion = false; lastMotionAt = now; impactFlagUntil = 0;
         Serial.println("Button: worker says I AM OK - fall / no-movement alarm cleared");
+        hapticEvent(3);
       } else {
         sosOn = !sosOn;
         Serial.println(sosOn ? "\n>>> SOS SENT - admin will see DANGER <<<\n" : "SOS cancelled");
+        hapticEvent(sosOn ? 1 : 2);
       }
       return true;
     }
@@ -819,6 +884,224 @@ void updateLed(uint32_t now) {
   else if (!locked)                on = (now % 2000) < 80;     // searching: short blink
   else                             on = false;
   digitalWrite(LED_PIN, on ? HIGH : LOW);
+}
+
+
+// ------------------------- vibration motor ---------------------------
+// A pattern = on/off times in ms, ending with 0. Runs in the background (no delay()).
+const uint16_t HP_TICK[]   = {80, 0};                                   // connected, direction changed
+const uint16_t HP_DOUBLE[] = {120, 150, 120, 0};                        // SOS cancelled, "still - move"
+const uint16_t HP_TRIPLE[] = {70, 90, 70, 90, 70, 0};                   // lost the repeaters
+const uint16_t HP_LONG[]   = {600, 0};                                  // SOS sent
+const uint16_t HP_ALERT[]  = {250, 150, 250, 150, 250, 0};              // alert / evacuate
+const uint16_t HP_FALL[]   = {900, 300, 900, 0};                        // fall / no movement
+const uint16_t* hapSeq = nullptr;
+uint8_t  hapIdx = 0;
+uint32_t hapNext = 0, hapLastAlarm = 0, hapLastAlert = 0;
+bool     hapOk = false, prewarned = false;
+uint8_t  lastGuideCode = 0xFF;
+
+void hapticOut(bool on) {
+#if HAPTIC_ENABLED
+  if (hapOk) ledcWrite(HAPTIC_PIN, on ? HAPTIC_STRENGTH : 0);
+#endif
+}
+void hapticPlay(const uint16_t* seq) {
+  hapSeq = seq; hapIdx = 0; hapNext = millis() + seq[0];
+  hapticOut(true);
+}
+void hapticEvent(uint8_t ev) {          // 1 SOS on, 2 SOS off, 3 I'm OK, 4 connected, 5 lost link
+  const uint16_t* t[] = {nullptr, HP_LONG, HP_DOUBLE, HP_TICK, HP_TICK, HP_TRIPLE};
+  if (ev <= 5 && t[ev]) hapticPlay(t[ev]);
+}
+uint8_t guideFor(uint8_t rep, uint16_t& dist);   // (display section)
+
+void hapticUpdate(uint32_t now) {
+  if (hapSeq && (int32_t)(now - hapNext) >= 0) {          // step through the running pattern
+    hapIdx++;
+    if (hapSeq[hapIdx] == 0) { hapSeq = nullptr; hapticOut(false); }
+    else { hapticOut(hapIdx % 2 == 0); hapNext = now + hapSeq[hapIdx]; }
+  }
+  if (hapSeq) return;
+  // repeating alarms
+  if (fallActive || noMotion) {                            // until the worker presses "I'm OK"
+    if (now - hapLastAlarm > 2600) { hapLastAlarm = now; hapticPlay(HP_FALL); }
+    return;
+  }
+  if (alertOn || guideEvac) {                              // every 4 s for 30 s, then every 15 s
+    uint32_t gap = now - alertSince < 30000 ? 4000 : 15000;
+    if (now - hapLastAlert > gap) { hapLastAlert = now; hapticPlay(HP_ALERT); return; }
+    uint16_t d; uint8_t c = guideFor(nearRep, d);
+    if (lastGuideCode != 0xFF && c != lastGuideCode) { hapticPlay(HP_TICK); }   // new instruction on the screen
+    lastGuideCode = c;
+    return;
+  }
+  lastGuideCode = 0xFF;
+  hapLastAlert = 0;
+  // early warning: still for a while, the no-movement alarm comes in 10 s
+  if (mpuOk && !MOCK_TEMP_ONLY) {
+    uint32_t still = now - lastMotionAt;
+    if (still < 1000) prewarned = false;
+    else if (!prewarned && still > NOMOTION_MS - 10000) { prewarned = true; hapticPlay(HP_DOUBLE); }
+  }
+}
+
+void hapticBegin() {
+#if HAPTIC_ENABLED
+  hapOk = ledcAttach(HAPTIC_PIN, 20000, 8);                // 20 kHz PWM: no whine from the motor
+  hapticOut(false);
+  Serial.printf("  Vibration motor on GPIO%d %s\n", HAPTIC_PIN, hapOk ? "ready" : "FAILED (pin in use?)");
+#endif
+}
+
+// ------------------------- OLED display -------------------------------
+uint8_t guideFor(uint8_t rep, uint16_t& dist) {         // instruction shown by this repeater's exit sign
+  dist = 0;
+  if (!rep) return G_NONE;
+  for (uint8_t i = 0; i < guideN; i++) if (guideTab[i].rep == rep) { dist = guideTab[i].dist; return guideTab[i].code; }
+  return G_NONE;
+}
+
+#if DISPLAY_ENABLED
+Adafruit_SSD1306 oled(128, 64, &Wire, -1, 400000, 100000);    // 400 kHz while drawing (~25 ms), then back to 100 kHz
+#endif
+bool     dispOk = false;
+uint8_t  dispDemo = 0;                   // 'd' on Serial: show every screen for 2 s
+uint32_t dispDemoAt = 0;
+
+#if DISPLAY_ENABLED
+void centered(const char* t, int y, uint8_t size) {
+  oled.setTextSize(size);
+  int w = strlen(t) * 6 * size;
+  oled.setCursor(max(0, (128 - w) / 2), y);
+  oled.print(t);
+}
+void arrow(uint8_t code, int x, int y) {                 // 40 x 40 arrow, top-left at (x, y)
+  if (code == G_LEFT)  { oled.fillTriangle(x, y + 20, x + 20, y, x + 20, y + 40, SSD1306_WHITE); oled.fillRect(x + 20, y + 13, 20, 14, SSD1306_WHITE); }
+  if (code == G_RIGHT) { oled.fillTriangle(x + 40, y + 20, x + 20, y, x + 20, y + 40, SSD1306_WHITE); oled.fillRect(x, y + 13, 20, 14, SSD1306_WHITE); }
+  if (code == G_UP)    { oled.fillTriangle(x + 20, y, x, y + 20, x + 40, y + 20, SSD1306_WHITE); oled.fillRect(x + 13, y + 20, 14, 20, SSD1306_WHITE); }
+}
+void signalBars(int x, int y) {
+  int bars = !locked ? 0 : nearRssi > -60 ? 4 : nearRssi > -70 ? 3 : nearRssi > -80 ? 2 : 1;
+  for (int i = 0; i < 4; i++) {
+    int h = 2 + i * 2;
+    if (i < bars) oled.fillRect(x + i * 4, y + 8 - h, 3, h, SSD1306_WHITE);
+    else oled.drawRect(x + i * 4, y + 8 - h, 3, h, SSD1306_WHITE);
+  }
+}
+
+// screens: 0 normal, 1 evacuate, 2 alert, 3 fall / no movement, 4 SOS
+void drawScreen(uint8_t scr, uint32_t now) {
+  bool blink = (now / 500) % 2;
+  char b[24];
+  oled.clearDisplay();
+  oled.setTextColor(SSD1306_WHITE);
+  oled.invertDisplay(false);
+  if (scr == 3) {                                          // fall / no movement: ask the worker
+    oled.invertDisplay(blink);
+    centered(fallActive || dispDemo ? "FALL DETECTED" : "NO MOVEMENT", 0, 1);
+    centered("ARE YOU", 14, 2);
+    centered("OK?", 32, 2);
+    centered("Press the button", 54, 1);
+  } else if (scr == 1 || scr == 2) {                       // evacuation / admin alert
+    oled.invertDisplay(blink && now - alertSince < 30000);
+    centered(scr == 1 ? "EVACUATE" : "ALERT!", 0, 2);
+    uint16_t dist; uint8_t c = guideFor(nearRep, dist);
+    if (dispDemo) { c = G_LEFT; dist = 85; }
+    if (scr == 2 && !dispDemo) {
+      centered("Leave the area", 26, 1);
+      centered("Follow instructions", 38, 1);
+    } else if (c & G_DANGER) {
+      centered("DANGER", 22, 2);
+      centered("Zone! Move out now", 44, 1);
+    } else if (c == G_HERE) {
+      centered("EXIT HERE", 26, 2);
+    } else if (c == G_NOWAY) {
+      centered("No safe route", 24, 1);
+      centered("Go to refuge or", 36, 1);
+      centered("wait for rescue", 46, 1);
+    } else if (c == G_LEFT || c == G_RIGHT || c == G_UP) {
+      arrow(c, 4, 20);
+      snprintf(b, sizeof(b), "%um", dist);
+      oled.setTextSize(2); oled.setCursor(56, 24); oled.print(b);
+      oled.setTextSize(1); oled.setCursor(56, 44); oled.print("to exit");
+    } else {
+      centered("Follow the", 24, 1);
+      centered("EXIT SIGNS", 36, 2);
+    }
+    if (nearRep && !dispDemo) { snprintf(b, sizeof(b), "sign REP-%02u", nearRep); centered(b, 56, 1); }
+  } else if (scr == 4) {                                   // SOS sent
+    centered("SOS SENT", 4, 2);
+    centered("Help is coming", 28, 1);
+    centered(locked ? "Signal OK" : "NO SIGNAL - move", 40, 1);
+    centered("Press to cancel", 54, 1);
+  } else {                                                 // normal: vitals
+    oled.setTextSize(1); oled.setCursor(0, 0); oled.print(BODY_ID);
+    if (locked) { snprintf(b, sizeof(b), "REP-%02u", nearRep); oled.setCursor(68, 0); oled.print(b); }
+    else { oled.setCursor(62, 0); oled.print(blink ? "NO SIGNAL" : ""); }
+    signalBars(112, 0);
+    oled.drawFastHLine(0, 10, 128, SSD1306_WHITE);
+    oled.setCursor(0, 14); oled.print("HEART");
+    oled.setCursor(66, 14); oled.print("BODY C");
+    oled.setTextSize(2);
+    oled.setCursor(0, 25);
+    if (beat.bpm) oled.print(beat.bpm); else oled.print("--");
+    oled.setCursor(66, 25);
+    if (dsOk && !isnan(dsTemp)) oled.print(dsTemp, 1); else oled.print("--");
+    oled.setTextSize(1);
+    oled.setCursor(0, 44);
+    snprintf(b, sizeof(b), "Steps %u", steps); oled.print(b);
+    oled.setCursor(0, 55);
+    uint32_t still = now - lastMotionAt;
+    if (mpuOk && still > NOMOTION_MS - 10000) oled.print("Still? Move or press");
+    else if (!locked) oled.print("Out of coverage");
+    else oled.print("Press button = SOS");
+  }
+  oled.display();
+}
+#endif
+
+void displayUpdate(uint32_t now) {
+#if DISPLAY_ENABLED
+  if (!dispOk) return;
+  static uint32_t last = 0;
+  if (now - last < 250) return;                            // 4 frames a second
+  last = now;
+  uint8_t scr;
+  if (dispDemo) {
+    if (now - dispDemoAt > 2000) { dispDemoAt = now; if (++dispDemo > 5) dispDemo = 0; }
+    scr = dispDemo ? dispDemo - 1 : 0;
+  } else if (fallActive || noMotion) scr = 3;
+  else if (guideEvac) scr = 1;
+  else if (alertOn) scr = 2;
+  else if (sosOn) scr = 4;
+  else scr = 0;
+  drawScreen(scr, now);
+#endif
+}
+
+void displayBegin() {
+#if DISPLAY_ENABLED
+  if (!i2cPresent(DISPLAY_ADDR)) { Serial.printf("  OLED NOT found at 0x%02X -> no display\n", DISPLAY_ADDR); return; }
+  dispOk = oled.begin(SSD1306_SWITCHCAPVCC, DISPLAY_ADDR, false, false);   // Wire is already started on our pins
+  if (!dispOk) { Serial.println("  OLED found but did not start (out of memory?)"); return; }
+  if (DISPLAY_FLIP) oled.setRotation(2);
+  oled.clearDisplay();
+  oled.setTextColor(SSD1306_WHITE);
+  centered("MineSafe", 6, 2);
+  centered(BODY_ID, 28, 1);
+  centered("Keep still...", 44, 1);
+  oled.display();
+  Serial.printf("  OLED display found at 0x%02X\n", DISPLAY_ADDR);
+#endif
+}
+
+void serialCommands(uint32_t now) {
+  while (Serial.available()) {
+    char c = Serial.read();
+    if (c == 'v') { Serial.println("Vibration test: alert pattern"); hapticPlay(HP_ALERT); }
+    if (c == 'd') { Serial.println("Display test: every screen for 2 s"); dispDemo = 1; dispDemoAt = now; }
+  }
 }
 
 // ------------------------- setup / loop ------------------------------
@@ -849,6 +1132,10 @@ void setup() {
   int found = 0;
   for (uint8_t a = 1; a < 127; a++) if (i2cPresent(a)) { Serial.printf(" 0x%02X", a); found++; }
   Serial.println(found ? "" : " none (check SDA/SCL/3V3/GND)");
+  displayBegin();
+  hapticBegin();
+  hapticOut(true); delay(80); hapticOut(false);                // one short buzz at power-on = motor works
+  delay(300);                                                  // let it stop before the gyro calibration
 
 #if MOCK_TEMP_ONLY
   Serial.printf("  MOCK body unit: DS18B20 temperature only (data GPIO%d, 4.7k to 3V3)\n", DS18B20_PIN);
@@ -912,6 +1199,9 @@ void loop() {
   sensorRecover(now);
   bool changed = handleButton(now);
   updateLed(now);
+  hapticUpdate(now);
+  displayUpdate(now);
+  serialCommands(now);
 
   static uint32_t lastStatus = 0;                           // a status line every 5 s, so the monitor is never silent
   if (now - lastStatus >= 5000) {

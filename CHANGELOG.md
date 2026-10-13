@@ -78,6 +78,10 @@ Detailed git versions below (v0.0–v1.0 make up V2).
 - [ ] Kit-removal sensing (helmet IR sensor, vest buckle reed switch)
 - [ ] Battery, enclosure, demo video
 
+## v3.4 — Body unit display and vibration
+- `firmware/body_node`: **SSD1306 0.96" OLED** on the sensor I²C bus — vitals (heart rate, body temperature, steps), nearest repeater + signal bars, and full-screen prompts: **EVACUATE** with the exit direction and distance from the nearest repeater's sign (read from the evacuation guide in the beacons), EXIT HERE, DANGER zone, no safe route, ALERT, ARE YOU OK? (fall / no movement), SOS SENT. **Vibration motor** on GPIO20 (PWM, through an NPN or a motor module) with patterns for alert / evacuation, fall, early still-warning, SOS on/off, connected, lost coverage and a new exit direction. Serial `v` / `d` = vibration / display test. `DISPLAY_ENABLED`, `HAPTIC_ENABLED` switches; builds without the display libraries when off.
+- Docs: body wiring + schematic with the OLED and motor driver, screen previews (`docs/images/body_oled_screens.png`), BOM.
+
 ## v3.3 — Exit-sign repeaters, evacuation routes, gas limits
 The tested v3.1 repeater is frozen on branch [`version/v3.1-repeater-final`](https://github.com/Manas-36/MINESAFE/tree/version/v3.1-repeater-final).
 - `firmware/repeater_node`: **MAX7219 8×32 LED matrix exit sign** (own driver; arrow + distance, `EXIT`, `NO GO`, `DANGR`, `GAS!`, `SOS`, `ALERT`; dim name/air display in normal times), buzzer kept with an evacuation pattern; **up to 3 MQ gas sensors** (`GAS_CHANNELS`, D2 / D0 / D1); **SOS button** (hold 1.5 s); the hub's evacuation guide travels down the chain at the end of every beacon (old body units / repeaters ignore the extra bytes). Serial `d` = display test, `s` = SOS.

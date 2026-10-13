@@ -62,6 +62,21 @@ Board *ESP32C6 Dev Module*. `body_node.ino` picks these pins by itself on that b
 | HW-827 S (analog) | GPIO2 |
 | SOS button (→ GND) | GPIO18 |
 | Red LED (220 Ω) | GPIO19 |
+| **OLED SSD1306 0.96" (v3.4)** VCC / GND / SDA / SCL | 3V3 / GND / GPIO6 / GPIO7 (same bus as the sensors, 0x3C) |
+| **Vibration motor (v3.4)** via NPN (S8050 / BC547) — 1 kΩ to base | GPIO20 |
+
+**Display + vibration (v3.4).** The OLED shares the sensor I²C bus. The coin motor draws ~80 mA, more than a GPIO can give, so it is switched by an NPN transistor: GPIO20 → 1 kΩ → base, emitter → GND, collector → motor −, motor + → 3V3, and a 1N4148 diode across the motor (stripe to +). A ready "vibration motor module" (IN / VCC / GND) can be used instead: IN → GPIO20. XIAO C6: motor on D9 (GPIO20); ESP32-S3: GPIO10. Libraries: *Adafruit SSD1306* + *Adafruit GFX*. Serial `v` = vibration test, `d` = show every screen. `DISPLAY_ENABLED` / `HAPTIC_ENABLED` turn them off.
+
+![Body unit display screens](images/body_oled_screens.png)
+
+| Vibration | Means |
+|---|---|
+| 3 pulses every 4 s (every 15 s after 30 s) | ALERT / EVACUATE — look at the screen |
+| long pulses every 2.6 s | fall or no movement — press the button if you are OK |
+| 2 short | you have been still for 20 s (alarm in 10 s) · SOS cancelled |
+| 1 long | SOS sent |
+| 1 short | connected to a repeater · exit direction changed |
+| 3 quick | lost the repeaters (out of coverage) |
 
 Avoid GPIO8 (on-board RGB LED), GPIO9 (BOOT), GPIO4/5/15 (strapping) and GPIO12/13 (USB). Only GPIO0–6 read analog on the C6.
 

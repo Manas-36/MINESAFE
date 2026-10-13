@@ -11,7 +11,9 @@ Prices are approximate Indian online prices (Oct 2026); check before ordering. "
 | Skin temperature | DS18B20 probe + 4.7 kΩ | MAX30208 / TMP117 chip on the back plate | 1 | 120–500 |
 | Pulse + SpO₂ | MAX30102 (+ HW-827 backup) | MAX30101 / MAX30102 behind a window | 1 | 150–400 |
 | SOS button | tactile button | large glove-friendly button | 1 | 20 |
-| Alert | red LED + 220 Ω | LED + **vibration motor** (with NPN / MOSFET driver) | 1 | 60 |
+| Alert LED | red LED + 220 Ω | same | 1 | 5 |
+| **Display (v3.4)** | SSD1306 0.96" OLED 128×64 (I²C) | same, or 1.3" SH1106 for gloves-on reading | 1 | 200 |
+| **Vibration (v3.4)** | 10 mm coin motor 3 V + S8050 NPN + 1 kΩ + 1N4148 (or vibration-motor module) | same, on the PCB | 1 | 40–80 |
 | Battery | 3.7 V Li-ion / LiPo 1000 mAh | LiPo 500–1000 mAh with protection | 1 | 250 |
 | Charging | TP4056 module with protection | charger IC (e.g. TP4056 / MCP73831) + pogo-pin dock | 1 | 50 |
 | 3.3 V regulator | on the DevKit | low-quiescent LDO (e.g. ME6211, HT7333) | 1 | 20 |
@@ -55,4 +57,4 @@ Prices are approximate Indian online prices (Oct 2026); check before ordering. "
 Jumper wires, perfboard / PCB, headers, heat-shrink, JST connectors, soldering kit, multimeter.
 
 ## Prototype set to build now (1 body unit, 3 repeaters, 1 entry station)
-≈ ₹2,000 body unit + 3 × ≈ ₹2,300 repeaters (with matrix + 3 MQ sensors) + ≈ ₹1,600 entry station ≈ **₹10,500**, plus wiring and boxes. Upgrading every repeater's gas sensors to electrochemical / NDIR adds roughly ₹5,000–8,000 per repeater.
+≈ ₹2,300 body unit (with display + vibration) + 3 × ≈ ₹2,300 repeaters (with matrix + 3 MQ sensors) + ≈ ₹1,600 entry station ≈ **₹10,800**, plus wiring and boxes. Upgrading every repeater's gas sensors to electrochemical / NDIR adds roughly ₹5,000–8,000 per repeater.
