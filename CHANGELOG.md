@@ -78,6 +78,11 @@ Detailed git versions below (v0.0–v1.0 make up V2).
 - [ ] Kit-removal sensing (helmet IR sensor, vest buckle reed switch)
 - [ ] Battery, enclosure, demo video
 
+## v3.5 — MineSafe Control (3D control-room app)
+- `frontend/` (React + Three.js, TypeScript): a full control-room app built on the hub's live data only — 3D mine from the hub map (tunnels, exits, repeaters with their live LED exit signs, workers by status, danger zones, routes to the nearest exit, trails, mine plan), *Needs attention* list, worker and repeater details (vitals with limits, location, radio path, route, history charts, medical card, gas vs limits, sign and buzzer state), Workers / Gas & air / Network / Entry / Log pages, Alert and Evacuate with confirmation, entry approve / reject / revoke, hub-offline banner, phone layout, MineSafe colours and logo, fonts bundled for offline sites.
+- `hub/admin_hub.py`: serves the built app at `/control/` (from `hub/control/`), *3D control room* button on the classic page, tab links skip the opening screen.
+- Docs: [docs/control_app.md](docs/control_app.md) — pages, running, building, and what a dedicated server needs (login and roles, device keys, HTTPS, stored history).
+
 ## v3.4 — Body unit display and vibration
 - `firmware/body_node`: **SSD1306 0.96" OLED** on the sensor I²C bus — vitals (heart rate, body temperature, steps), nearest repeater + signal bars, and full-screen prompts: **EVACUATE** with the exit direction and distance from the nearest repeater's sign (read from the evacuation guide in the beacons), EXIT HERE, DANGER zone, no safe route, ALERT, ARE YOU OK? (fall / no movement), SOS SENT. **Vibration motor** on GPIO20 (PWM, through an NPN or a motor module) with patterns for alert / evacuation, fall, early still-warning, SOS on/off, connected, lost coverage and a new exit direction. Serial `v` / `d` = vibration / display test. `DISPLAY_ENABLED`, `HAPTIC_ENABLED` switches; builds without the display libraries when off.
 - Docs: body wiring + schematic with the OLED and motor driver, screen previews (`docs/images/body_oled_screens.png`), BOM.

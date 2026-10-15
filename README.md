@@ -138,7 +138,11 @@ Full steps: [docs/setup.md](docs/setup.md) · Wiring + schematics: [docs/wiring.
 
 ## Screenshots
 
-Every page of the control-room website: **[docs/website.md](docs/website.md)**. Reports: **[docs/report](docs/report/)** (blue book + figures).
+**New (v3.5): MineSafe Control** — a 3D control-room app at `http://<laptop-ip>:5000/control/`, live data only, works on a phone: **[docs/control_app.md](docs/control_app.md)**.
+
+![MineSafe Control during an evacuation](docs/images/control/evacuation.png)
+
+Every page of the classic control-room website: **[docs/website.md](docs/website.md)**. Reports: **[docs/report](docs/report/)** (blue book + figures).
 
 | Evacuation map | Live |
 |---|---|

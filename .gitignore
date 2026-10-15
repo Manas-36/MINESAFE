@@ -12,3 +12,7 @@ __pycache__/
 build/
 .DS_Store
 Thumbs.db
+
+# 3D control app (frontend) — build output goes to hub/control and IS committed
+frontend/node_modules/
+frontend/dist/

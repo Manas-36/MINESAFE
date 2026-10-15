@@ -62,3 +62,6 @@ No. GitHub (and GitHub Pages) only stores files / serves static pages — it can
 
 ## Demo map
 `tools/demo_map/` has a fictional mine plan plus a ready `map.json` (see its README) so the Map tab can be tested before the real plan is available.
+
+## 3D control app
+With the hub running, open **http://localhost:5000/control/** (phone: `http://<laptop-ip>:5000/control/`). Nothing extra to install. Guide: [control_app.md](control_app.md).

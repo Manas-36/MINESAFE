@@ -2021,6 +2021,27 @@ def index():
     return DASHBOARD
 
 
+# ---- MineSafe Control: the 3D control-room app (built from ../frontend into ./control) ----
+CONTROL_DIR = os.path.join(BASE, "control")
+
+
+@app.get("/control")
+@app.get("/control/")
+@app.get("/control/<path:fn>")
+def control_app(fn="index.html"):
+    """Serves the 3D control-room app. Unknown paths fall back to index.html (the app routes itself)."""
+    if not os.path.isfile(os.path.join(CONTROL_DIR, "index.html")):
+        return ("MineSafe Control is not built yet. Run: cd frontend && npm install && npm run build", 404)
+    if fn != "index.html" and os.path.isfile(os.path.join(CONTROL_DIR, fn)):
+        resp = send_from_directory(CONTROL_DIR, fn)
+        if fn.startswith("assets/"):
+            resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"   # file names carry a hash
+        return resp
+    resp = send_from_directory(CONTROL_DIR, "index.html")
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
 # =====================================================================
 #  Dashboard page (plain HTML + JS, no internet needed)
 # =====================================================================
@@ -2285,6 +2306,7 @@ tr.bad td{background:#ff4d4f14}
     <div class="chips" id="chips"></div>
     <div class="spacer"></div>
     <span class="clock" id="clock">--:--:--</span>
+    <a class="btn amber" href="/control/" title="3D control-room app">3D control room</a>
     <button class="btn red alertbtn" id="alert-open">⚠ ALERT</button>
   </div>
   <div class="banner" id="banner">
@@ -3403,6 +3425,7 @@ poll(); setInterval(poll, 1000); setInterval(loadHistory, 2000);
 </script>
 <script>
 (function(){const sp=document.getElementById("splash"),go=document.getElementById("go");
+if(location.hash.length>1){sp.remove();return}   // opened from a link to a tab (e.g. from /control): skip the opening screen
 function enter(){sp.classList.add("gone");setTimeout(()=>sp.remove(),500);document.removeEventListener("keydown",key)}
 function key(e){if(e.key==="Enter"||e.key===" "){e.preventDefault();enter()}}
 go.onclick=enter;document.addEventListener("keydown",key);setTimeout(()=>go.focus(),1500)})();
