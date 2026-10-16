@@ -81,4 +81,6 @@ def uplink():
 
 
 threading.Thread(target=uplink, daemon=True).start()
-ThreadingHTTPServer(("127.0.0.1", 8081), H).serve_forever()
+# 0.0.0.0 = phones on the same hotspot can open it too: http://<laptop-ip>:8081/
+print(f"Phone test page: http://localhost:8081/  (phone: http://<laptop-ip>:8081/)  -> hub {HUB}")
+ThreadingHTTPServer(("0.0.0.0", 8081), H).serve_forever()
