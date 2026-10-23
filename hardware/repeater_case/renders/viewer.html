@@ -1,0 +1,55 @@
+<!doctype html><html><head><meta charset="utf-8">
+<style>html,body{margin:0;background:#12171A;overflow:hidden}#cap{position:fixed;left:24px;top:18px;color:#F3F0E8;font:600 22px Arial}#sub{position:fixed;left:24px;top:50px;color:#c9c4b8;font:15px Arial;max-width:900px}</style>
+<script type="importmap">{"imports":{"three":"/frontend/node_modules/three/build/three.module.js","three/addons/":"/frontend/node_modules/three/examples/jsm/"}}</script>
+</head><body><div id="cap"></div><div id="sub"></div>
+<script type="module">
+import * as THREE from 'three';
+import {STLLoader} from 'three/addons/loaders/STLLoader.js';
+const P=new URLSearchParams(location.search), view=P.get('v')||'front';
+const W=1600,H=1100;
+const r=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true}); r.setSize(W,H); r.setPixelRatio(1);
+r.toneMapping=THREE.ACESFilmicToneMapping; document.body.appendChild(r.domElement);
+const sc=new THREE.Scene(); sc.background=new THREE.Color('#12171A');
+sc.add(new THREE.HemisphereLight(0xffffff,0x334455,1.4));
+const d1=new THREE.DirectionalLight(0xffffff,2.2); d1.position.set(-300,-500,600); sc.add(d1);
+const d2=new THREE.DirectionalLight(0xffffff,0.8); d2.position.set(400,300,200); sc.add(d2);
+const L=new STLLoader();
+const mat=(c,o=1)=>new THREE.MeshStandardMaterial({color:c,metalness:0.05,roughness:0.55,transparent:o<1,opacity:o,side:THREE.DoubleSide});
+const items={
+ base:['../case_base.stl','#F2A900'], lid:['../case_lid.stl','#2b3034'],
+ pcb:['stl/pcb.stl','#1d7a3a'], pcb_parts:['stl/pcb_parts.stl','#6d8f78'], matrix:['stl/matrix.stl','#b0201b'],
+ window_pc:['stl/window_pc.stl','#9fd3ff'], mq4_ch4:['stl/mq4_ch4.stl','#4a6fa5'], mq7_co:['stl/mq7_co.stl','#4a6fa5'],
+ mq136_h2s:['stl/mq136_h2s.stl','#4a6fa5'], aht20:['stl/aht20.stl','#e0e0e0'], battery_3s:['stl/battery_3s.stl','#2a4fb0'],
+ charger_bms:['stl/charger_bms.stl','#3c8c6a'], sos_button_body:['stl/sos_button_body.stl','#d93025'], buzzer:['stl/buzzer.stl','#222'],
+ vent_nut:['stl/vent_nut.stl','#888'], gland_nut:['stl/gland_nut.stl','#888'], xiao_usb_plug:['stl/xiao_usb_plug.stl','#555']};
+const V={
+ front:{show:['base','lid','window_pc','matrix','sos_button_body'],cam:[-260,-430,170],tgt:[0,0,20],lidOff:0},
+ back:{show:['base','lid'],cam:[260,420,120],tgt:[0,0,20],lidOff:0},
+ exploded:{show:Object.keys(items),cam:[-520,-330,230],tgt:[0,-60,10],lidOff:-170,lidOp:0.5},
+ open:{show:Object.keys(items).filter(k=>!['lid','window_pc','matrix','sos_button_body','buzzer'].includes(k)),cam:[0,-470,30],tgt:[0,0,10],lidOff:0,ortho:true},
+ bottom:{show:['base','lid','gland_nut'],cam:[-200,-260,-330],tgt:[0,0,-40],lidOff:0},
+};
+const v=V[view];
+document.getElementById('cap').textContent=P.get('t')||'';
+document.getElementById('sub').textContent=P.get('s')||'';
+let n=0; const want=v.show;
+for(const k of want){ const [u,c]=items[k];
+ L.load(u,g=>{ g.computeVertexNormals();
+  const isLid=['lid','window_pc','matrix','sos_button_body','buzzer'].includes(k);
+  const m=new THREE.Mesh(g,mat(c,k==='lid'&&v.lidOp?v.lidOp:(k==='window_pc'?0.35:1)));
+  if(isLid) m.position.y=v.lidOff;
+  sc.add(m);
+  if(['base','lid'].includes(k)){const e=new THREE.LineSegments(new THREE.EdgesGeometry(g,30),new THREE.LineBasicMaterial({color:'#000',transparent:true,opacity:0.35})); e.position.copy(m.position); sc.add(e);}
+  if(++n===want.length){ draw(); }});}
+function draw(){
+ let cam;
+ if(v.ortho){const s=1.0;cam=new THREE.OrthographicCamera(-W/2*0.2*s,W/2*0.2*s,H/2*0.2*s,-H/2*0.2*s,1,3000);}
+ else cam=new THREE.PerspectiveCamera(30,W/H,1,5000);
+ const box=new THREE.Box3().setFromObject(sc), sph=box.getBoundingSphere(new THREE.Sphere());
+ const dir=new THREE.Vector3(...v.cam).sub(new THREE.Vector3(...v.tgt)).normalize();
+ cam.up.set(0,0,1);
+ if(v.ortho){ cam.position.copy(sph.center).addScaledVector(dir,1000); const k=sph.radius*1.0; cam.left=-k*W/H; cam.right=k*W/H; cam.top=k; cam.bottom=-k; cam.updateProjectionMatrix(); }
+ else { const dist=sph.radius/Math.sin(THREE.MathUtils.degToRad(15))*0.92; cam.position.copy(sph.center).addScaledVector(dir,dist); }
+ cam.lookAt(sph.center.clone().add(new THREE.Vector3(0,0,-sph.radius*0.04)));
+ r.render(sc,cam); window.DONE=true; }
+</script></body></html>

@@ -1,0 +1,3 @@
+base volume 502 cm3 (~652 g in PC-ABS FR)  lid 328 cm3 (~427 g)
+overall 223 x 292 x 118 mm (W x H incl. tabs x D incl. hood)
+fit check: PCB, matrix, window, 3 MQ modules, AHT20, battery, charger, SOS button and buzzer clear the case and each other

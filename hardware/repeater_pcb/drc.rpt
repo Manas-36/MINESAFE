@@ -1,0 +1,191 @@
+** Drc report for repeater.kicad_pcb **
+** Created on 2026-10-23 06:09:52 **
+
+** Found 57 DRC violations **
+[silk_overlap]: Silkscreen overlap
+    Rule: board setup constraints silk; Severity: warning
+    @(131.5750 mm, 150.0250 mm): Reference 'C3'
+    @(132.4697 mm, 145.2750 mm): Circle on F.Silkscreen
+[silk_overlap]: Silkscreen overlap
+    Rule: board setup constraints silk; Severity: warning
+    @(176.1550 mm, 158.1550 mm): Reference 'R23'
+    @(175.8950 mm, 161.4250 mm): Line on F.Silkscreen
+[silk_overlap]: Silkscreen overlap
+    Rule: board setup constraints silk; Severity: warning
+    @(179.8950 mm, 161.4250 mm): Line on F.Silkscreen
+    @(180.0250 mm, 160.5750 mm): Reference 'C13'
+[silk_overlap]: Silkscreen overlap
+    Rule: board setup constraints silk; Severity: warning
+    @(177.1550 mm, 161.4250 mm): Line on F.Silkscreen
+    @(180.0250 mm, 160.5750 mm): Reference 'C13'
+[silk_overlap]: Silkscreen overlap
+    Rule: board setup constraints silk; Severity: warning
+    @(158.1550 mm, 158.1550 mm): Reference 'R22'
+    @(157.8950 mm, 161.4250 mm): Line on F.Silkscreen
+[silk_overlap]: Silkscreen overlap
+    Rule: board setup constraints silk; Severity: warning
+    @(161.8950 mm, 161.4250 mm): Line on F.Silkscreen
+    @(162.0250 mm, 160.5750 mm): Reference 'C12'
+[silk_overlap]: Silkscreen overlap
+    Rule: board setup constraints silk; Severity: warning
+    @(159.1550 mm, 161.4250 mm): Line on F.Silkscreen
+    @(162.0250 mm, 160.5750 mm): Reference 'C12'
+[silk_overlap]: Silkscreen overlap
+    Rule: board setup constraints silk; Severity: warning
+    @(144.0250 mm, 160.5750 mm): Reference 'C11'
+    @(141.1550 mm, 161.4250 mm): Line on F.Silkscreen
+[silk_overlap]: Silkscreen overlap
+    Rule: board setup constraints silk; Severity: warning
+    @(144.0250 mm, 160.5750 mm): Reference 'C11'
+    @(143.8950 mm, 161.4250 mm): Line on F.Silkscreen
+[silk_overlap]: Silkscreen overlap
+    Rule: board setup constraints silk; Severity: warning
+    @(140.1550 mm, 158.1550 mm): Reference 'R21'
+    @(139.8950 mm, 161.4250 mm): Line on F.Silkscreen
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; Severity: warning
+    @(150.0000 mm, 170.8000 mm): PCB Text 'github.com/Manas-36/MINESAFE' on B.Silkscreen
+[lib_footprint_issues]: The current configuration does not include the library 'Connector_PinSocket_2.54mm'.
+    Local override; Severity: warning
+    @(161.0650 mm, 103.8250 mm): Footprint U2B
+[lib_footprint_issues]: The current configuration does not include the library 'Package_TO_SOT_THT'.
+    Local override; Severity: warning
+    @(186.4850 mm, 130.7550 mm): Footprint Q1
+[lib_footprint_issues]: The current configuration does not include the library 'Capacitor_THT'.
+    Local override; Severity: warning
+    @(127.0396 mm, 129.2750 mm): Footprint C1
+[lib_footprint_issues]: The current configuration does not include the library 'Diode_THT'.
+    Local override; Severity: warning
+    @(114.8750 mm, 119.3750 mm): Footprint D2
+[lib_footprint_issues]: The current configuration does not include the library 'MountingHole'.
+    Local override; Severity: warning
+    @(103.4750 mm, 171.4750 mm): Footprint H3
+[lib_footprint_issues]: The current configuration does not include the library 'TerminalBlock_Phoenix'.
+    Local override; Severity: warning
+    @(106.2350 mm, 117.1550 mm): Footprint J1
+[lib_footprint_issues]: The current configuration does not include the library 'Resistor_THT'.
+    Local override; Severity: warning
+    @(160.5250 mm, 163.2350 mm): Footprint R22
+[lib_footprint_issues]: The current configuration does not include the library 'Connector_JST'.
+    Local override; Severity: warning
+    @(195.3750 mm, 157.4750 mm): Footprint J6
+[lib_footprint_issues]: The current configuration does not include the library 'Connector_JST'.
+    Local override; Severity: warning
+    @(138.9750 mm, 169.8750 mm): Footprint J3
+[lib_footprint_issues]: The current configuration does not include the library 'Package_DIP'.
+    Local override; Severity: warning
+    @(169.5750 mm, 103.6250 mm): Footprint U3
+[lib_footprint_issues]: The current configuration does not include the library 'Resistor_THT'.
+    Local override; Severity: warning
+    @(101.5750 mm, 152.0250 mm): Footprint R4
+[lib_footprint_issues]: The current configuration does not include the library 'Connector_JST'.
+    Local override; Severity: warning
+    @(174.9750 mm, 169.8750 mm): Footprint J5
+[lib_footprint_issues]: The current configuration does not include the library 'Connector_JST'.
+    Local override; Severity: warning
+    @(195.3750 mm, 121.9750 mm): Footprint J7
+[lib_footprint_issues]: The current configuration does not include the library 'Resistor_THT'.
+    Local override; Severity: warning
+    @(167.0750 mm, 146.0250 mm): Footprint R7
+[lib_footprint_issues]: The current configuration does not include the library 'Connector_PinSocket_2.54mm'.
+    Local override; Severity: warning
+    @(145.8250 mm, 103.8250 mm): Footprint U2A
+[lib_footprint_issues]: The current configuration does not include the library 'Fuse'.
+    Local override; Severity: warning
+    @(114.9850 mm, 128.5250 mm): Footprint F1
+[lib_footprint_issues]: The current configuration does not include the library 'Capacitor_THT'.
+    Local override; Severity: warning
+    @(164.5250 mm, 163.0750 mm): Footprint C12
+[lib_footprint_issues]: The current configuration does not include the library 'Converter_DCDC'.
+    Local override; Severity: warning
+    @(118.0700 mm, 143.3600 mm): Footprint U1
+[lib_footprint_issues]: The current configuration does not include the library 'TerminalBlock_Phoenix'.
+    Local override; Severity: warning
+    @(106.2350 mm, 130.1550 mm): Footprint J2
+[lib_footprint_issues]: The current configuration does not include the library 'Diode_THT'.
+    Local override; Severity: warning
+    @(182.2750 mm, 135.6950 mm): Footprint D4
+[lib_footprint_issues]: The current configuration does not include the library 'Resistor_THT'.
+    Local override; Severity: warning
+    @(167.0750 mm, 141.5250 mm): Footprint R6
+[lib_footprint_issues]: The current configuration does not include the library 'Resistor_THT'.
+    Local override; Severity: warning
+    @(101.5750 mm, 137.0250 mm): Footprint R2
+[lib_footprint_issues]: The current configuration does not include the library 'Capacitor_THT'.
+    Local override; Severity: warning
+    @(129.0750 mm, 152.5250 mm): Footprint C3
+[lib_footprint_issues]: The current configuration does not include the library 'Connector_JST'.
+    Local override; Severity: warning
+    @(195.3750 mm, 132.4750 mm): Footprint J8
+[lib_footprint_issues]: The current configuration does not include the library 'Capacitor_THT'.
+    Local override; Severity: warning
+    @(130.7197 mm, 145.2750 mm): Footprint C2
+[lib_footprint_issues]: The current configuration does not include the library 'Capacitor_THT'.
+    Local override; Severity: warning
+    @(185.5750 mm, 139.5250 mm): Footprint C5
+[lib_footprint_issues]: The current configuration does not include the library 'Capacitor_THT'.
+    Local override; Severity: warning
+    @(166.1250 mm, 108.0750 mm): Footprint C4
+[lib_footprint_issues]: The current configuration does not include the library 'MountingHole'.
+    Local override; Severity: warning
+    @(196.4750 mm, 171.4750 mm): Footprint H4
+[lib_footprint_issues]: The current configuration does not include the library 'Resistor_THT'.
+    Local override; Severity: warning
+    @(138.5250 mm, 163.2350 mm): Footprint R11
+[lib_footprint_issues]: The current configuration does not include the library 'Resistor_THT'.
+    Local override; Severity: warning
+    @(156.5250 mm, 163.2350 mm): Footprint R12
+[lib_footprint_issues]: The current configuration does not include the library 'Capacitor_THT'.
+    Local override; Severity: warning
+    @(146.5250 mm, 163.0750 mm): Footprint C11
+[lib_footprint_issues]: The current configuration does not include the library 'Resistor_THT'.
+    Local override; Severity: warning
+    @(101.5750 mm, 147.5250 mm): Footprint R3
+[lib_footprint_issues]: The current configuration does not include the library 'Resistor_THT'.
+    Local override; Severity: warning
+    @(142.5250 mm, 163.2350 mm): Footprint R21
+[lib_footprint_issues]: The current configuration does not include the library 'LED_THT'.
+    Local override; Severity: warning
+    @(115.6750 mm, 157.7750 mm): Footprint LED1
+[lib_footprint_issues]: The current configuration does not include the library 'Diode_THT'.
+    Local override; Severity: warning
+    @(114.8750 mm, 111.8750 mm): Footprint D1
+[lib_footprint_issues]: The current configuration does not include the library 'Connector_JST'.
+    Local override; Severity: warning
+    @(156.9750 mm, 169.8750 mm): Footprint J4
+[lib_footprint_issues]: The current configuration does not include the library 'Resistor_THT'.
+    Local override; Severity: warning
+    @(169.5750 mm, 128.5250 mm): Footprint R5
+[lib_footprint_issues]: The current configuration does not include the library 'MountingHole'.
+    Local override; Severity: warning
+    @(103.4750 mm, 103.4750 mm): Footprint H1
+[lib_footprint_issues]: The current configuration does not include the library 'Connector_JST'.
+    Local override; Severity: warning
+    @(195.3750 mm, 142.4750 mm): Footprint J9
+[lib_footprint_issues]: The current configuration does not include the library 'Resistor_THT'.
+    Local override; Severity: warning
+    @(101.5750 mm, 157.5250 mm): Footprint R1
+[lib_footprint_issues]: The current configuration does not include the library 'Resistor_THT'.
+    Local override; Severity: warning
+    @(174.5250 mm, 163.2350 mm): Footprint R13
+[lib_footprint_issues]: The current configuration does not include the library 'Diode_THT'.
+    Local override; Severity: warning
+    @(115.4750 mm, 137.5750 mm): Footprint D3
+[lib_footprint_issues]: The current configuration does not include the library 'Package_TO_SOT_THT'.
+    Local override; Severity: warning
+    @(102.4850 mm, 142.7550 mm): Footprint Q2
+[lib_footprint_issues]: The current configuration does not include the library 'MountingHole'.
+    Local override; Severity: warning
+    @(196.4750 mm, 103.4750 mm): Footprint H2
+[lib_footprint_issues]: The current configuration does not include the library 'Resistor_THT'.
+    Local override; Severity: warning
+    @(178.5250 mm, 163.2350 mm): Footprint R23
+[lib_footprint_issues]: The current configuration does not include the library 'Capacitor_THT'.
+    Local override; Severity: warning
+    @(182.5250 mm, 163.0750 mm): Footprint C13
+
+** Found 0 unconnected pads **
+
+** Found 0 Footprint errors **
+
+** End of Report **
