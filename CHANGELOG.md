@@ -8,7 +8,7 @@ Each version is one commit on `main` and has its own branch, `version/v0.0` … 
 | **V1** | Body ESP only, repeaters on Wi-Fi, data stored in the cloud | Wi-Fi + internet | No website — data extracted by hand | [docs/v1.md](docs/v1.md) |
 | **V2** | Body ESP ↔ repeaters over ESP-NOW, entry station, AI kit check, map, gas (git v0.0–v1.0) | ESP-NOW chain → Wi-Fi to laptop | Control-room website | [docs/v2.md](docs/v2.md) |
 | **V3** | Camera entry station, XIAO C6 repeaters, AHT air sensing, sensor integration — **in calibration, not complete** (v3.0–v3.2) | ESP-NOW | Website + camera entry | [docs/v3.md](docs/v3.md) |
-| **V4** | **Our own PCBs and sensor boards** (body unit, repeater, entry station) replacing breadboard wiring | ESP-NOW | Website | [docs/v4.md](docs/v4.md) (planned) |
+| **V4** | **Smart suit** replacing the tagged kit (core, helmet, wrist and boot pods; tear / removal alerts; voice + wrist screen) on **our own PCBs** | ESP-NOW (+ LoRa backbone) | Website + 3D control app | [docs/v4.md](docs/v4.md) (planned) |
 
 Detailed git versions below (v0.0–v1.0 make up V2).
 

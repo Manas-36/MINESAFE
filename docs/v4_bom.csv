@@ -1,0 +1,45 @@
+Group,Part,Use,Qty,Unit price (INR approx),Have already,Final product choice
+Core pod (chest),ESP32-C6-WROOM-1 DevKit,Suit brain: sensors + ESP-NOW to repeaters + links to the other pods,1,450,yes,ESP32-C6-MINI-1 on own PCB
+Core pod (chest),Li-ion/LiPo 3.7 V 3000 mAh with protection,Power for a 10-12 h shift,1,500,no,Same with certified pack
+Core pod (chest),TP4056 USB-C charger module (protected),Charging from the dock,1,40,no,MCP73831 on PCB
+Core pod (chest),3.3 V buck-boost regulator (TPS63020 module),Stable 3.3 V from 3.0-4.2 V battery,1,200,no,On PCB
+Core pod (chest),MAX17048 fuel gauge,Battery % to the hub and cuff,1,250,no,On PCB
+Core pod (chest),MPU6050 IMU,Fall / no movement / heading,1,150,yes,BMI270
+Core pod (chest),BMP180 pressure sensor,Height / level change,1,150,yes,BMP390
+Core pod (chest),22 mm mushroom SOS button (IP67),SOS reachable with either hand,1,150,no,Same
+Core pod (chest),2-pin magnetic pogo charge connector,Drop-in charging on the dock,1,250,no,Same
+Core pod (chest),Enclosure + gasket (3D printed),Protect core pod,1,350,no,Moulded IP65 case
+Core pod (chest),JST-PH connectors + silicone wire,Harness to cuff / sensors,1,300,no,Woven/flat textile cable
+Helmet pod,Seeed XIAO ESP32-C6,Helmet link + antenna + speaker driver,1,650,no,Same module on PCB
+Helmet pod,u.FL to SMA pigtail + 3 dBi 2.4 GHz antenna,Better range from head height,1,350,no,Same
+Helmet pod,MAX98357A I2S amplifier,Drives the speaker,1,180,no,On PCB
+Helmet pod,Speaker 28-40 mm 8 ohm 1 W,Voice alerts (evacuate / go left 80 m),1,80,no,Same
+Helmet pod,LiPo 600 mAh + TP4056,Helmet runs on its own if separated,1,260,no,Same
+Helmet pod,Micro limit switch in head harness,Helmet worn check,1,40,no,Same
+Helmet pod,Mining safety helmet with cap-lamp bracket,Certified helmet (pod clips on),1,500,no,Certified helmet
+Helmet pod,Helmet pod housing (3D printed),Clip-on pod,1,200,no,Moulded clip
+Wrist cuff (wired to core),1.3 in SH1106 OLED (I2C),Worker screen: vitals / EVACUATE + direction,1,350,no,Same or sunlight-readable TFT
+Wrist cuff (wired to core),16 mm large push buttons,Glove-friendly controls (OK / menu / SOS),3,50,no,Same
+Wrist cuff (wired to core),Coin vibration motor + S8050 + 1N4148 + 1 kohm,Haptic alerts,1,60,no,On PCB
+Wrist cuff (wired to core),MAX30102 pulse oximeter,Heart rate + SpO2 at the wrist,1,220,yes,MAX30101
+Wrist cuff (wired to core),6-core flexible cable + IP67 M8/GX12 connector,Sleeve link to the core,1,400,no,Textile cable
+Wrist cuff (wired to core),Cuff housing with flip cover + strap,Protect screen,1,300,no,Moulded cuff
+Boot pod,Seeed XIAO ESP32-C6,Boot link to the core,1,650,no,Same module on PCB
+Boot pod,BMI270 IMU,Foot-mounted step length (accurate distance),1,350,no,Same
+Boot pod,LiPo 300 mAh + TP4056,Boot pod power,1,220,no,Same
+Boot pod,FSR402 force sensor,Boot worn + foot contact for step timing,1,350,no,Same
+Boot pod,Safety boots,Certified boots (pod clips to heel),1,1500,no,Certified boots
+Boot pod,Heel clip housing (3D printed),Mount the pod,1,200,no,Moulded clip
+Suit (fabric + sensing),Flame-retardant cotton mining coverall with reflective tape,The suit (washable; pods removable),1,2000,no,FR coverall in sizes
+Suit (fabric + sensing),Stainless conductive thread,Tear / opening detection loop in seams and closures,1,450,no,Woven conductive tape
+Suit (fabric + sensing),Metal snap fasteners,Conductive joints between pods and fabric loop,1,150,no,Same
+Suit (fabric + sensing),Reed switch + magnet at zip end,Suit closed check,1,60,no,Same
+Suit (fabric + sensing),DS18B20 skin probe,Skin temperature (chest / underarm),1,100,yes,MAX30208 patch
+Suit (fabric + sensing),Copper tape pad (ESP32 touch pin),Skin contact = suit is worn,1,80,no,Same
+Suit (fabric + sensing),Pockets / velcro for pods,Hold pods in place,1,200,no,Sewn in
+Entry chamber (per site),Main repeater (XIAO ESP32-C6),Pairs suits at the entry and links to the hub,1,0,yes,Same
+Entry chamber (per site),PN532 HW-147C + OLED,Worker ID card tap,1,0,yes,Same
+Entry chamber (per site),NFC ID cards (NTAG215),One per worker,3,30,no,Same
+Entry chamber (per site),Charging dock: 5 V 4 A supply + 4 pogo slots + shelf,Charge suits between shifts,1,1200,no,Wall dock
+Repeaters (each),Repeater v3.3 (see final_bom.md),Chain + LED exit sign + gas + SOS,3,2300,partly,Own PCB
+Repeaters (optional V4),SX1262 LoRa module (865-867 MHz) + antenna,Long-range repeater-to-repeater backbone,3,900,no,Same
