@@ -20,3 +20,8 @@ frontend/dist/
 # KiCad / Freerouting local files
 hardware/**/logs/
 *.kicad_prl
+
+# generated render meshes / router logs
+hardware/suit_cad/renders/stl/
+*_freerouting.log
+__pycache__/

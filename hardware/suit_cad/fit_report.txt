@@ -1,0 +1,4 @@
+core    pod 118 x 93 x 44 mm  fit OK
+cuff    pod 88 x 75 x 27 mm  fit OK
+helmet  pod 75 x 66 x 31 mm  fit OK
+boot    pod 57 x 58 x 29 mm  fit OK

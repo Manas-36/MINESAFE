@@ -1,0 +1,109 @@
+** Drc report for /home/claude/minesafe/hardware/suit_pcb/helmet/helmet.kicad_pcb **
+** Created on 2026-10-24 11:40:32 **
+
+** Found 30 DRC violations **
+[silk_overlap]: Silkscreen overlap
+    Rule: board setup constraints silk; Severity: warning
+    @(107.4200 mm, 112.7300 mm): Reference 'R2'
+    @(106.1500 mm, 112.1500 mm): Circle on F.Silkscreen
+[silk_overlap]: Silkscreen overlap
+    Rule: board setup constraints silk; Severity: warning
+    @(109.0200 mm, 118.3900 mm): Reference 'LED1'
+    @(109.2710 mm, 118.5700 mm): Line on F.Silkscreen
+[silk_overlap]: Silkscreen overlap
+    Rule: board setup constraints silk; Severity: warning
+    @(109.0200 mm, 121.3500 mm): Arc on F.Silkscreen
+    @(108.8400 mm, 123.1101 mm): Reference 'C2'
+[silk_overlap]: Silkscreen overlap
+    Rule: board setup constraints silk; Severity: warning
+    @(109.0200 mm, 121.3500 mm): Arc on F.Silkscreen
+    @(108.8400 mm, 123.1101 mm): Reference 'C2'
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; Severity: warning
+    @(109.0200 mm, 118.3900 mm): Reference 'LED1'
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; Severity: warning
+    @(107.4200 mm, 112.7300 mm): Reference 'R2'
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; Severity: warning
+    @(109.2300 mm, 111.8200 mm): Reference 'R1'
+[lib_footprint_issues]: The current configuration does not include the library 'Connector_PinSocket_2.54mm'.
+    Local override; Severity: warning
+    @(129.5400 mm, 102.8000 mm): Footprint U1B
+[lib_footprint_issues]: The current configuration does not include the library 'MountingHole'.
+    Local override; Severity: warning
+    @(102.4597 mm, 144.9549 mm): Footprint H1
+[lib_footprint_issues]: The current configuration does not include the library 'LED_THT'.
+    Local override; Severity: warning
+    @(107.7500 mm, 121.3500 mm): Footprint LED1
+[lib_footprint_issues]: The current configuration does not include the library 'Capacitor_THT'.
+    Local override; Severity: warning
+    @(105.1500 mm, 119.6500 mm): Footprint C3
+[lib_footprint_issues]: The current configuration does not include the library 'MountingHole'.
+    Local override; Severity: warning
+    @(141.4597 mm, 144.9549 mm): Footprint H2
+[lib_footprint_issues]: The current configuration does not include the library 'Capacitor_THT'.
+    Local override; Severity: warning
+    @(107.8400 mm, 126.8601 mm): Footprint C2
+[lib_footprint_issues]: The current configuration does not include the library 'Resistor_THT'.
+    Local override; Severity: warning
+    @(106.1500 mm, 114.6500 mm): Footprint R2
+[lib_footprint_issues]: The current configuration does not include the library 'Connector_JST'.
+    Local override; Severity: warning
+    @(140.2000 mm, 105.4500 mm): Footprint J3
+[lib_footprint_issues]: The current configuration does not include the library 'Connector_JST'.
+    Local override; Severity: warning
+    @(140.2000 mm, 113.4500 mm): Footprint J4
+[lib_footprint_issues]: The current configuration does not include the library 'Capacitor_THT'.
+    Local override; Severity: warning
+    @(116.1500 mm, 122.1500 mm): Footprint C4
+[lib_footprint_issues]: The current configuration does not include the library 'Resistor_THT'.
+    Local override; Severity: warning
+    @(111.1500 mm, 113.0900 mm): Footprint R1
+[lib_footprint_issues]: The current configuration does not include the library 'Connector_PinSocket_2.54mm'.
+    Local override; Severity: warning
+    @(114.3000 mm, 145.7500 mm): Footprint U2
+[lib_footprint_issues]: The current configuration does not include the library 'Resistor_THT'.
+    Local override; Severity: warning
+    @(106.1500 mm, 112.1500 mm): Footprint R3
+[lib_footprint_issues]: The current configuration does not include the library 'Connector_JST'.
+    Local override; Severity: warning
+    @(102.7000 mm, 105.4500 mm): Footprint J1
+[lib_footprint_issues]: The current configuration does not include the library 'Connector_PinHeader_2.54mm'.
+    Local override; Severity: warning
+    @(108.8000 mm, 102.8000 mm): Footprint J2
+[lib_footprint_issues]: The current configuration does not include the library 'Connector_PinSocket_2.54mm'.
+    Local override; Severity: warning
+    @(114.3000 mm, 102.8000 mm): Footprint U1A
+[lib_footprint_issues]: The current configuration does not include the library 'Diode_THT'.
+    Local override; Severity: warning
+    @(133.2000 mm, 121.4900 mm): Footprint D1
+[lib_footprint_issues]: The current configuration does not include the library 'Capacitor_THT'.
+    Local override; Severity: warning
+    @(108.6500 mm, 117.6500 mm): Footprint C1
+[silk_edge_clearance]: Silkscreen clipped by board edge
+    Rule: board setup constraints silk; Severity: warning
+    @(102.0000 mm, 100.0000 mm): Line on Edge.Cuts
+    @(129.5400 mm, 100.0300 mm): Reference 'U1B'
+[silk_edge_clearance]: Silkscreen clipped by board edge
+    Rule: board setup constraints silk; Severity: warning
+    @(142.0000 mm, 148.0000 mm): Line on Edge.Cuts
+    @(111.5300 mm, 145.7500 mm): Value 'MAX98357A' of U2
+[silk_edge_clearance]: Silkscreen clipped by board edge
+    Rule: board setup constraints silk; Severity: warning
+    @(100.0000 mm, 146.0000 mm): Line on Edge.Cuts
+    @(99.8000 mm, 104.4500 mm): Value 'BATT 600mAh' of J1
+[silk_edge_clearance]: Silkscreen clipped by board edge
+    Rule: board setup constraints silk; Severity: warning
+    @(102.0000 mm, 100.0000 mm): Line on Edge.Cuts
+    @(108.8000 mm, 100.4700 mm): Value 'TO XIAO BAT' of J2
+[silk_edge_clearance]: Silkscreen clipped by board edge
+    Rule: board setup constraints silk; Severity: warning
+    @(102.0000 mm, 100.0000 mm): Line on Edge.Cuts
+    @(114.3000 mm, 100.0300 mm): Reference 'U1A'
+
+** Found 0 unconnected pads **
+
+** Found 0 Footprint errors **
+
+** End of Report **

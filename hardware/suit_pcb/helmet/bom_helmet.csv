@@ -1,0 +1,15 @@
+Qty,References,Value / module,Footprint,Description,Approx INR each
+3,C1 C3 C4,100nF,C_Disc_D3.0mm_W1.6mm_P2.50mm,ceramic capacitor,1
+1,C2,100uF 10V,CP_Radial_D5.0mm_P2.00mm,electrolytic capacitor,4
+1,D1,1N5819,D_DO-41_SOD81_P2.54mm_Vertical_AnodeUp,Schottky diode,3
+1,J1,BATT 600mAh,JST_PH_B2B-PH-K_1x02_P2.00mm_Vertical,JST-PH 2.0 mm vertical + housing + crimped lead,8
+1,J2,TO XIAO BAT,PinHeader_1x02_P2.54mm_Vertical,male header (wire pads to module),3
+1,J3,POGO,JST_PH_B2B-PH-K_1x02_P2.00mm_Vertical,JST-PH 2.0 mm vertical + housing + crimped lead,8
+1,J4,WORN SW,JST_PH_B2B-PH-K_1x02_P2.00mm_Vertical,JST-PH 2.0 mm vertical + housing + crimped lead,8
+1,LED1,STATUS,LED_D3.0mm,3 mm LED,1
+2,R1 R2,220k,R_Axial_DIN0204_L3.6mm_D1.6mm_P2.54mm_Vertical,"resistor 1/8 W, standing",0.5
+1,R3,1k,R_Axial_DIN0204_L3.6mm_D1.6mm_P2.54mm_Vertical,"resistor 1/8 W, standing",0.5
+1,U2,MAX98357A,PinSocket_1x07_P2.54mm_Vertical,female header socket 2.54 mm,10
+1,U1A,XIAO D0-D6,PinSocket_1x07_P2.54mm_Vertical,female header socket 2.54 mm,10
+1,U1B,XIAO 5V-D7,PinSocket_1x07_P2.54mm_Vertical,female header socket 2.54 mm,10
+1,PCB,MineSafe helmet v4.0,2-layer 1.6 mm,JLCPCB (5 pcs min),50

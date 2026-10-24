@@ -1,0 +1,319 @@
+{
+ "items": [
+  {
+   "name": "w_core_base",
+   "color": "#2b3034",
+   "group": "pods",
+   "opacity": 1.0
+  },
+  {
+   "name": "w_core_lid",
+   "color": "#F2A900",
+   "group": "pods",
+   "opacity": 1.0
+  },
+  {
+   "name": "w_core_inside",
+   "color": "#1d6b3a",
+   "group": "inside",
+   "opacity": 1.0
+  },
+  {
+   "name": "w_cuff_base",
+   "color": "#2b3034",
+   "group": "pods",
+   "opacity": 1.0
+  },
+  {
+   "name": "w_cuff_lid",
+   "color": "#F2A900",
+   "group": "pods",
+   "opacity": 1.0
+  },
+  {
+   "name": "w_cuff_inside",
+   "color": "#1d6b3a",
+   "group": "inside",
+   "opacity": 1.0
+  },
+  {
+   "name": "w_helmet_base",
+   "color": "#2b3034",
+   "group": "pods",
+   "opacity": 1.0
+  },
+  {
+   "name": "w_helmet_lid",
+   "color": "#F2A900",
+   "group": "pods",
+   "opacity": 1.0
+  },
+  {
+   "name": "w_helmet_inside",
+   "color": "#1d6b3a",
+   "group": "inside",
+   "opacity": 1.0
+  },
+  {
+   "name": "w_boot_base",
+   "color": "#2b3034",
+   "group": "pods",
+   "opacity": 1.0
+  },
+  {
+   "name": "w_boot_lid",
+   "color": "#F2A900",
+   "group": "pods",
+   "opacity": 1.0
+  },
+  {
+   "name": "w_boot_inside",
+   "color": "#1d6b3a",
+   "group": "inside",
+   "opacity": 1.0
+  },
+  {
+   "name": "coverall_torso",
+   "color": "#24456b",
+   "group": "body",
+   "opacity": 1.0
+  },
+  {
+   "name": "coverall_limbs",
+   "color": "#24456b",
+   "group": "body",
+   "opacity": 1.0
+  },
+  {
+   "name": "collar",
+   "color": "#1b3554",
+   "group": "body",
+   "opacity": 1.0
+  },
+  {
+   "name": "skin",
+   "color": "#c68642",
+   "group": "body",
+   "opacity": 1.0
+  },
+  {
+   "name": "gloves",
+   "color": "#d8b25a",
+   "group": "body",
+   "opacity": 1.0
+  },
+  {
+   "name": "boots",
+   "color": "#1b1b1b",
+   "group": "body",
+   "opacity": 1.0
+  },
+  {
+   "name": "reflective_bands",
+   "color": "#d9dde0",
+   "group": "body",
+   "opacity": 1.0
+  },
+  {
+   "name": "helmet",
+   "color": "#f4f1e6",
+   "group": "body",
+   "opacity": 1.0
+  },
+  {
+   "name": "cap_lamp",
+   "color": "#555a5e",
+   "group": "body",
+   "opacity": 1.0
+  },
+  {
+   "name": "sleeve_cable",
+   "color": "#3a3f44",
+   "group": "wiring",
+   "opacity": 1.0
+  },
+  {
+   "name": "tear_thread",
+   "color": "#c0c6cc",
+   "group": "wiring",
+   "opacity": 1.0
+  },
+  {
+   "name": "zip",
+   "color": "#111111",
+   "group": "wiring",
+   "opacity": 1.0
+  },
+  {
+   "name": "reed_switch",
+   "color": "#e8710a",
+   "group": "sensors",
+   "opacity": 1.0
+  },
+  {
+   "name": "zip_magnet",
+   "color": "#9aa0a6",
+   "group": "sensors",
+   "opacity": 1.0
+  },
+  {
+   "name": "skin_pad",
+   "color": "#b87333",
+   "group": "sensors",
+   "opacity": 1.0
+  },
+  {
+   "name": "skin_temp_probe",
+   "color": "#b87333",
+   "group": "sensors",
+   "opacity": 1.0
+  },
+  {
+   "name": "helmet_worn_switch",
+   "color": "#e8710a",
+   "group": "sensors",
+   "opacity": 1.0
+  },
+  {
+   "name": "heel_fsr",
+   "color": "#e8710a",
+   "group": "sensors",
+   "opacity": 1.0
+  }
+ ],
+ "pods": {
+  "core": {
+   "parts": [
+    "core_base",
+    "core_lid"
+   ],
+   "contents": [
+    "core_pcb",
+    "core_parts",
+    "core_modules",
+    "core_xiao",
+    "battery_3000mAh",
+    "charger_tp4056",
+    "buck_tps63020",
+    "gauge_max17048",
+    "sos_button",
+    "gx12_socket",
+    "toggle",
+    "pogo_socket"
+   ]
+  },
+  "cuff": {
+   "parts": [
+    "cuff_base",
+    "cuff_lid"
+   ],
+   "contents": [
+    "cuff_pcb",
+    "cuff_parts",
+    "cuff_modules",
+    "button_ok",
+    "button_menu",
+    "button_sos",
+    "gx12_socket",
+    "vib_motor"
+   ]
+  },
+  "helmet": {
+   "parts": [
+    "helmet_base",
+    "helmet_lid"
+   ],
+   "contents": [
+    "helmet_pcb",
+    "helmet_parts",
+    "helmet_modules",
+    "helmet_xiao",
+    "battery_600mAh",
+    "speaker_28mm",
+    "fpc_antenna",
+    "pogo_socket"
+   ]
+  },
+  "boot": {
+   "parts": [
+    "boot_base",
+    "boot_lid"
+   ],
+   "contents": [
+    "boot_pcb",
+    "boot_parts",
+    "boot_modules",
+    "boot_xiao",
+    "battery_300mAh",
+    "pogo_socket"
+   ]
+  }
+ },
+ "anchors": {
+  "helmet": [
+   0.0,
+   148.772970980244,
+   1712.3290819288272
+  ],
+  "core": [
+   0.0,
+   -153.0,
+   1330.0
+  ],
+  "sos": [
+   36.0,
+   -158.0,
+   1338.0
+  ],
+  "cuff": [
+   283.7604882621998,
+   -88.1336273211364,
+   1029.2924879524871
+  ],
+  "boot": [
+   -110.0,
+   135.5,
+   72.0
+  ],
+  "sleeve": [
+   212,
+   -45,
+   1300
+  ],
+  "tear": [
+   160.0,
+   0,
+   1150
+  ],
+  "zip": [
+   14,
+   -110.66666666666667,
+   1460
+  ],
+  "skinpad": [
+   -70,
+   -114.5,
+   1390
+  ],
+  "probe": [
+   -191.0,
+   -10,
+   1360
+  ],
+  "worn": [
+   0,
+   5,
+   1762.0
+  ],
+  "fsr": [
+   -110,
+   70,
+   15
+  ],
+  "lamp": [
+   0,
+   -145,
+   1682
+  ]
+ }
+}

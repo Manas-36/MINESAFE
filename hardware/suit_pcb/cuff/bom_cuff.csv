@@ -1,0 +1,14 @@
+Qty,References,Value / module,Footprint,Description,Approx INR each
+3,C1 C2 C3,100nF,C_Disc_D3.0mm_W1.6mm_P2.50mm,ceramic capacitor,1
+1,D1,1N4148,D_DO-35_SOD27_P2.54mm_Vertical_AnodeUp,signal diode,1
+1,J1,TO CORE,JST_PH_B6B-PH-K_1x06_P2.00mm_Vertical,JST-PH 2.0 mm vertical + housing + crimped lead,8
+1,J2,BUTTONS,JST_PH_B4B-PH-K_1x04_P2.00mm_Vertical,JST-PH 2.0 mm vertical + housing + crimped lead,8
+1,J3,MOTOR,JST_PH_B2B-PH-K_1x02_P2.00mm_Vertical,JST-PH 2.0 mm vertical + housing + crimped lead,8
+1,Q1,S8050,TO-92_Inline,NPN transistor,2
+2,R1 R5,10k,R_Axial_DIN0204_L3.6mm_D1.6mm_P2.54mm_Vertical,"resistor 1/8 W, standing",0.5
+1,R2,2.2k,R_Axial_DIN0204_L3.6mm_D1.6mm_P2.54mm_Vertical,"resistor 1/8 W, standing",0.5
+1,R3,6.8k,R_Axial_DIN0204_L3.6mm_D1.6mm_P2.54mm_Vertical,"resistor 1/8 W, standing",0.5
+1,R4,1k,R_Axial_DIN0204_L3.6mm_D1.6mm_P2.54mm_Vertical,"resistor 1/8 W, standing",0.5
+1,U1,OLED 1.3in,PinSocket_1x04_P2.54mm_Vertical,female header socket 2.54 mm,10
+1,U2,MAX30102,PinSocket_1x07_P2.54mm_Vertical,female header socket 2.54 mm,10
+1,PCB,MineSafe cuff v4.0,2-layer 1.6 mm,JLCPCB (5 pcs min),50

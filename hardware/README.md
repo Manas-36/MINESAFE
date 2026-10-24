@@ -1,5 +1,7 @@
 # MineSafe hardware — repeater PCB v4.0 and case
 
+> V4 smart suit pods (4 PCBs + enclosures + full-suit CAD): see **[suit.md](suit.md)**.
+
 This replaces the breadboard / jumper-wire repeater with **one carrier PCB** for the Seeed XIAO ESP32-C6 and a **mine-rated enclosure** designed around it. It uses the same pins as `firmware/repeater_node` (v3.3), so the firmware runs unchanged. Set `GAS_CHANNELS 3` to use all three gas inputs.
 
 | | |

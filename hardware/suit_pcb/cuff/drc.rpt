@@ -1,0 +1,120 @@
+** Drc report for /home/claude/minesafe/hardware/suit_pcb/cuff/cuff.kicad_pcb **
+** Created on 2026-10-24 11:38:14 **
+
+** Found 34 DRC violations **
+[silk_overlap]: Silkscreen overlap
+    Rule: board setup constraints silk; Severity: warning
+    @(123.9200 mm, 115.7300 mm): Reference 'R2'
+    @(123.1500 mm, 115.1500 mm): Circle on F.Silkscreen
+[silk_overlap]: Silkscreen overlap
+    Rule: board setup constraints silk; Severity: warning
+    @(122.6500 mm, 117.6500 mm): Circle on F.Silkscreen
+    @(121.9000 mm, 118.6000 mm): Reference 'C1'
+[silk_overlap]: Silkscreen overlap
+    Rule: board setup constraints silk; Severity: warning
+    @(139.3000 mm, 117.4500 mm): Value 'MOTOR' of J3
+    @(139.1800 mm, 118.1300 mm): Line on F.Silkscreen
+[silk_overlap]: Silkscreen overlap
+    Rule: board setup constraints silk; Severity: warning
+    @(139.3000 mm, 117.4500 mm): Value 'MOTOR' of J3
+    @(137.3300 mm, 116.3300 mm): Arc on F.Silkscreen
+[silk_overlap]: Silkscreen overlap
+    Rule: board setup constraints silk; Severity: warning
+    @(133.7700 mm, 116.3300 mm): Reference 'Q1'
+    @(134.0700 mm, 116.5290 mm): Line on F.Silkscreen
+[silk_overlap]: Silkscreen overlap
+    Rule: board setup constraints silk; Severity: warning
+    @(142.7300 mm, 112.0290 mm): Line on F.Silkscreen
+    @(142.6900 mm, 111.8500 mm): Footprint Text 'A' of D1
+[silk_overlap]: Silkscreen overlap
+    Rule: board setup constraints silk; Severity: warning
+    @(127.4200 mm, 118.2300 mm): Reference 'R1'
+    @(128.1500 mm, 117.6500 mm): Circle on F.Silkscreen
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; Severity: warning
+    @(123.0000 mm, 118.0000 mm): PCB Text 'MAX30102 this side - faces the skin' on B.Silkscreen
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; Severity: warning
+    @(141.6000 mm, 111.4000 mm): Reference 'C2'
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; Severity: warning
+    @(123.9200 mm, 115.7300 mm): Reference 'R2'
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; Severity: warning
+    @(133.7700 mm, 116.3300 mm): Reference 'Q1'
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; Severity: warning
+    @(127.4200 mm, 118.2300 mm): Reference 'R1'
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; Severity: warning
+    @(142.6900 mm, 111.8500 mm): Footprint Text 'A' of D1
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; Severity: warning
+    @(121.9000 mm, 118.6000 mm): Reference 'C1'
+[lib_footprint_issues]: The current configuration does not include the library 'Connector_JST'.
+    Local override; Severity: warning
+    @(102.7000 mm, 121.4500 mm): Footprint J2
+[lib_footprint_issues]: The current configuration does not include the library 'Resistor_THT'.
+    Local override; Severity: warning
+    @(123.1500 mm, 115.1500 mm): Footprint R3
+[lib_footprint_issues]: The current configuration does not include the library 'Capacitor_THT'.
+    Local override; Severity: warning
+    @(143.6500 mm, 112.6500 mm): Footprint C2
+[lib_footprint_issues]: The current configuration does not include the library 'MountingHole'.
+    Local override; Severity: warning
+    @(143.4597 mm, 102.4549 mm): Footprint H2
+[lib_footprint_issues]: The current configuration does not include the library 'Connector_JST'.
+    Local override; Severity: warning
+    @(142.2000 mm, 118.4500 mm): Footprint J3
+[lib_footprint_issues]: The current configuration does not include the library 'Resistor_THT'.
+    Local override; Severity: warning
+    @(134.6500 mm, 128.5900 mm): Footprint R4
+[lib_footprint_issues]: The current configuration does not include the library 'MountingHole'.
+    Local override; Severity: warning
+    @(102.4597 mm, 139.4549 mm): Footprint H3
+[lib_footprint_issues]: The current configuration does not include the library 'Resistor_THT'.
+    Local override; Severity: warning
+    @(122.6500 mm, 117.6500 mm): Footprint R2
+[lib_footprint_issues]: The current configuration does not include the library 'Package_TO_SOT_THT'.
+    Local override; Severity: warning
+    @(137.3300 mm, 117.6000 mm): Footprint Q1
+[lib_footprint_issues]: The current configuration does not include the library 'Capacitor_THT'.
+    Local override; Severity: warning
+    @(133.1500 mm, 117.1500 mm): Footprint C3
+[lib_footprint_issues]: The current configuration does not include the library 'Resistor_THT'.
+    Local override; Severity: warning
+    @(126.1500 mm, 120.1500 mm): Footprint R1
+[lib_footprint_issues]: The current configuration does not include the library 'MountingHole'.
+    Local override; Severity: warning
+    @(102.4597 mm, 102.4549 mm): Footprint H1
+[lib_footprint_issues]: The current configuration does not include the library 'MountingHole'.
+    Local override; Severity: warning
+    @(143.4597 mm, 139.4549 mm): Footprint H4
+[lib_footprint_issues]: The current configuration does not include the library 'Connector_PinSocket_2.54mm'.
+    Local override; Severity: warning
+    @(119.2000 mm, 102.2500 mm): Footprint U1
+[lib_footprint_issues]: The current configuration does not include the library 'Diode_THT'.
+    Local override; Severity: warning
+    @(138.3500 mm, 111.8500 mm): Footprint D1
+[lib_footprint_issues]: The current configuration does not include the library 'Capacitor_THT'.
+    Local override; Severity: warning
+    @(120.6500 mm, 120.6500 mm): Footprint C1
+[lib_footprint_issues]: The current configuration does not include the library 'Connector_JST'.
+    Local override; Severity: warning
+    @(117.9500 mm, 138.2000 mm): Footprint J1
+[lib_footprint_issues]: The current configuration does not include the library 'Resistor_THT'.
+    Local override; Severity: warning
+    @(128.1500 mm, 117.6500 mm): Footprint R5
+[lib_footprint_issues]: The current configuration does not include the library 'Connector_PinSocket_2.54mm'.
+    Local override; Severity: warning
+    @(115.3000 mm, 125.8000 mm): Footprint U2
+[silk_edge_clearance]: Silkscreen clipped by board edge
+    Rule: board setup constraints silk; Severity: warning
+    @(100.0000 mm, 140.0000 mm): Line on Edge.Cuts
+    @(99.8000 mm, 118.4500 mm): Value 'BUTTONS' of J2
+
+** Found 0 unconnected pads **
+
+** Found 0 Footprint errors **
+
+** End of Report **

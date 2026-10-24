@@ -1,0 +1,114 @@
+** Drc report for /home/claude/minesafe/hardware/suit_pcb/boot/boot.kicad_pcb **
+** Created on 2026-10-24 11:38:42 **
+
+** Found 32 DRC violations **
+[silk_overlap]: Silkscreen overlap
+    Rule: board setup constraints silk; Severity: warning
+    @(125.6000 mm, 115.9000 mm): Reference 'C2'
+    @(125.8700 mm, 104.0700 mm): Line on F.Silkscreen
+[silk_overlap]: Silkscreen overlap
+    Rule: board setup constraints silk; Severity: warning
+    @(125.8700 mm, 104.0700 mm): Line on F.Silkscreen
+    @(125.6000 mm, 110.9000 mm): Reference 'C1'
+[silk_overlap]: Silkscreen overlap
+    Rule: board setup constraints silk; Severity: warning
+    @(130.4200 mm, 122.2300 mm): Reference 'R3'
+    @(129.1500 mm, 121.6500 mm): Circle on F.Silkscreen
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; Severity: warning
+    @(125.6000 mm, 115.9000 mm): Reference 'C2'
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; Severity: warning
+    @(130.8000 mm, 108.4700 mm): Value 'TO XIAO BAT' of J4
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; Severity: warning
+    @(130.4200 mm, 119.7300 mm): Reference 'R1'
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; Severity: warning
+    @(125.6000 mm, 110.9000 mm): Reference 'C1'
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; Severity: warning
+    @(128.1000 mm, 117.9000 mm): Reference 'C3'
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; Severity: warning
+    @(130.4200 mm, 122.2300 mm): Reference 'R3'
+[lib_footprint_issues]: The current configuration does not include the library 'LED_THT'.
+    Local override; Severity: warning
+    @(125.3500 mm, 123.8000 mm): Footprint LED1
+[lib_footprint_issues]: The current configuration does not include the library 'Capacitor_THT'.
+    Local override; Severity: warning
+    @(127.6500 mm, 117.1500 mm): Footprint C2
+[lib_footprint_issues]: The current configuration does not include the library 'Resistor_THT'.
+    Local override; Severity: warning
+    @(110.1500 mm, 122.1500 mm): Footprint R2
+[lib_footprint_issues]: The current configuration does not include the library 'Connector_JST'.
+    Local override; Severity: warning
+    @(102.7000 mm, 113.4500 mm): Footprint J2
+[lib_footprint_issues]: The current configuration does not include the library 'Connector_PinSocket_2.54mm'.
+    Local override; Severity: warning
+    @(110.6500 mm, 139.7500 mm): Footprint U2
+[lib_footprint_issues]: The current configuration does not include the library 'Connector_PinHeader_2.54mm'.
+    Local override; Severity: warning
+    @(130.8000 mm, 110.8000 mm): Footprint J4
+[lib_footprint_issues]: The current configuration does not include the library 'MountingHole'.
+    Local override; Severity: warning
+    @(102.4597 mm, 139.4549 mm): Footprint H1
+[lib_footprint_issues]: The current configuration does not include the library 'Resistor_THT'.
+    Local override; Severity: warning
+    @(129.1500 mm, 121.6500 mm): Footprint R1
+[lib_footprint_issues]: The current configuration does not include the library 'Capacitor_THT'.
+    Local override; Severity: warning
+    @(127.6500 mm, 112.1500 mm): Footprint C1
+[lib_footprint_issues]: The current configuration does not include the library 'Connector_JST'.
+    Local override; Severity: warning
+    @(102.7000 mm, 105.4500 mm): Footprint J1
+[lib_footprint_issues]: The current configuration does not include the library 'MountingHole'.
+    Local override; Severity: warning
+    @(131.4597 mm, 139.4549 mm): Footprint H2
+[lib_footprint_issues]: The current configuration does not include the library 'Connector_JST'.
+    Local override; Severity: warning
+    @(130.2000 mm, 105.4500 mm): Footprint J3
+[lib_footprint_issues]: The current configuration does not include the library 'Capacitor_THT'.
+    Local override; Severity: warning
+    @(130.1500 mm, 119.1500 mm): Footprint C3
+[lib_footprint_issues]: The current configuration does not include the library 'Diode_THT'.
+    Local override; Severity: warning
+    @(115.7000 mm, 122.7000 mm): Footprint D1
+[lib_footprint_issues]: The current configuration does not include the library 'Resistor_THT'.
+    Local override; Severity: warning
+    @(106.1500 mm, 120.0900 mm): Footprint R4
+[lib_footprint_issues]: The current configuration does not include the library 'Resistor_THT'.
+    Local override; Severity: warning
+    @(129.1500 mm, 124.1500 mm): Footprint R3
+[lib_footprint_issues]: The current configuration does not include the library 'Connector_PinSocket_2.54mm'.
+    Local override; Severity: warning
+    @(109.3000 mm, 102.8000 mm): Footprint U1A
+[lib_footprint_issues]: The current configuration does not include the library 'Connector_PinSocket_2.54mm'.
+    Local override; Severity: warning
+    @(124.5400 mm, 102.8000 mm): Footprint U1B
+[silk_edge_clearance]: Silkscreen clipped by board edge
+    Rule: board setup constraints silk; Severity: warning
+    @(100.0000 mm, 140.0000 mm): Line on Edge.Cuts
+    @(99.8000 mm, 112.4500 mm): Value 'POGO' of J2
+[silk_edge_clearance]: Silkscreen clipped by board edge
+    Rule: board setup constraints silk; Severity: warning
+    @(134.0000 mm, 102.0000 mm): Line on Edge.Cuts
+    @(130.8000 mm, 108.4700 mm): Value 'TO XIAO BAT' of J4
+[silk_edge_clearance]: Silkscreen clipped by board edge
+    Rule: board setup constraints silk; Severity: warning
+    @(100.0000 mm, 140.0000 mm): Line on Edge.Cuts
+    @(99.8000 mm, 104.4500 mm): Value 'BATT 300mAh' of J1
+[silk_edge_clearance]: Silkscreen clipped by board edge
+    Rule: board setup constraints silk; Severity: warning
+    @(102.0000 mm, 100.0000 mm): Line on Edge.Cuts
+    @(109.3000 mm, 100.0300 mm): Reference 'U1A'
+[silk_edge_clearance]: Silkscreen clipped by board edge
+    Rule: board setup constraints silk; Severity: warning
+    @(102.0000 mm, 100.0000 mm): Line on Edge.Cuts
+    @(124.5400 mm, 100.0300 mm): Reference 'U1B'
+
+** Found 0 unconnected pads **
+
+** Found 0 Footprint errors **
+
+** End of Report **

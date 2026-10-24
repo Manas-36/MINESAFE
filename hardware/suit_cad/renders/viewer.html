@@ -1,0 +1,64 @@
+<!doctype html><html><head><meta charset="utf-8">
+<style>html,body{margin:0;background:#12171A;overflow:hidden;font-family:Arial,Helvetica,sans-serif}
+#cap{position:fixed;left:28px;top:20px;color:#F3F0E8;font-weight:700;font-size:26px}#sub{position:fixed;left:28px;top:56px;color:#c9c4b8;font-size:15px;max-width:560px;line-height:1.35}
+svg{position:fixed;left:0;top:0}</style>
+<script type="importmap">{"imports":{"three":"/frontend/node_modules/three/build/three.module.js","three/addons/":"/frontend/node_modules/three/examples/jsm/"}}</script>
+</head><body><div id="cap"></div><div id="sub"></div><svg id="ov" width="1600" height="1200"></svg>
+<script type="module">
+import * as THREE from 'three';
+import {STLLoader} from 'three/addons/loaders/STLLoader.js';
+import {mergeVertices} from 'three/addons/utils/BufferGeometryUtils.js';
+const Q=new URLSearchParams(location.search); const view=Q.get('v'); const W=1600,H=1200;
+const M=await (await fetch('manifest.json')).json();
+const r=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true}); r.setSize(W,H); r.toneMapping=THREE.ACESFilmicToneMapping; document.body.prepend(r.domElement);
+const sc=new THREE.Scene(); sc.background=new THREE.Color('#12171A');
+sc.add(new THREE.HemisphereLight(0xffffff,0x2a3440,1.5));
+const d1=new THREE.DirectionalLight(0xffffff,2.0); sc.add(d1); const d2=new THREE.DirectionalLight(0xffffff,0.7); sc.add(d2);
+const L=new STLLoader(); const load=u=>new Promise(res=>L.load(u,g=>{g.computeVertexNormals();res(g)}));
+const mat=(c,o=1)=>new THREE.MeshStandardMaterial({color:c,metalness:0.08,roughness:0.6,transparent:o<1,opacity:o,depthWrite:o>=0.99,side:THREE.DoubleSide});
+const V={
+ front:{dir:[0.62,-1,0.28],groups:['body','pods','wiring','sensors'],t:'MineSafe V4 smart suit',s:'FR coverall with removable pods: core on the chest, wrist cuff on the left forearm, helmet pod, boot pod on the right heel. Sensing thread in the seams, reed switch on the zip.',
+  call:[['core','Core pod — ESP32-C6, 3000 mAh, IMU, pressure, fuel gauge'],['sos','SOS button (guarded, 22 mm)'],['cuff','Wrist cuff — screen, 3 glove buttons, vibration, heart rate'],['zip','Zip reed switch — suit closed'],['tear','Tear-detection thread in the seams'],['lamp','Cap-lamp bracket (helmet stays a certified item)']]},
+ back:{dir:[-0.6,1,0.32],groups:['body','pods','wiring','sensors'],t:'Back view',s:'Helmet pod (antenna at head height, speaker, own battery) and boot pod (foot IMU for real stride length, heel force sensor).',
+  call:[['helmet','Helmet pod — XIAO C6 + antenna, speaker, 600 mAh'],['boot','Boot pod — XIAO C6, BMI270 foot IMU, 300 mAh'],['tear','Seam thread loop runs down both sides']]},
+ xray:{dir:[0.5,-1,0.18],groups:['body','pods','wiring','sensors','inside'],xray:true,t:'X-ray: wiring and hidden sensors',s:'The only wire is the sleeve cable to the cuff. Helmet and boot pods talk to the core over ESP-NOW. Sensors in the lining connect to the core pod by snaps.',
+  call:[['sleeve','Sleeve cable (6-core, GX12) core ↔ cuff'],['skinpad','Skin-contact pad — suit is worn'],['probe','Skin-temperature probe (DS18B20)'],['worn','Helmet-worn switch in the harness'],['fsr','Heel force sensor under the insole'],['zip','Reed switch + magnet in the zip puller']]},
+};
+let groups, xray=false, cam;
+if(view.startsWith('pod_')){
+  const name=view.slice(4); const P=M.pods[name]; const items=[];
+  const lift={core:45,cuff:35,helmet:40,boot:38}[name];
+  for(const p of P.parts){const g=await load(`stl/pod_${p}.stl`); const m=new THREE.Mesh(g,mat(p.endsWith('lid')?'#F2A900':'#2b3034',p.endsWith('lid')?0.55:1)); if(p.endsWith('lid')) m.position.z=lift; sc.add(m);
+    const e=new THREE.LineSegments(new THREE.EdgesGeometry(g,30),new THREE.LineBasicMaterial({color:'#000',transparent:true,opacity:0.3})); e.position.copy(m.position); sc.add(e);}
+  const cc={pcb:'#1d6b3a',parts:'#7b8f83',modules:'#2f5f9e',xiao:'#111',battery:'#2a4fb0',button:'#d93025',sos:'#d93025',speaker:'#333',antenna:'#c9a24a',gx12:'#9aa0a6',toggle:'#9aa0a6',pogo:'#c9a24a',charger:'#3c8c6a',buck:'#3c8c6a',gauge:'#3c8c6a',vib:'#777'};
+  for(const c of P.contents){const g=await load(`stl/pod_${name}__${c}.stl`); const k=Object.keys(cc).find(k=>c.includes(k)); const m=new THREE.Mesh(g,mat(cc[k]||'#888')); sc.add(m);}
+  sc.rotation.x=-Math.PI/2;   // pod frame: Y up -> screen up
+  document.getElementById('cap').textContent=Q.get('t')||''; document.getElementById('sub').textContent=Q.get('s')||'';
+  cam=new THREE.PerspectiveCamera(30,W/H,1,5000); place([-0.85,1.0,1.2]);
+}else{
+  const v=V[view]; xray=!!v.xray;
+  document.getElementById('cap').textContent=v.t; document.getElementById('sub').textContent=v.s;
+  for(const it of M.items){ if(!v.groups.includes(it.group)) continue;
+    let g=await load(`stl/${it.name}.stl`); if(it.group==='body'){g.deleteAttribute('normal'); g=mergeVertices(g,0.5); g.computeVertexNormals();}
+    let op=1; if(xray && it.name.startsWith('coverall')) op=0.18; if(xray && (it.name==='helmet')) op=0.3; if(xray && it.name==='boots') op=0.35; if(xray && it.name.startsWith('w_') && it.name.endsWith('lid')) op=0.35;
+    sc.add(new THREE.Mesh(g,mat(it.color,op)));}
+  cam=new THREE.PerspectiveCamera(26,W/H,10,20000); place(v.dir);
+  r.render(sc,cam);
+  const ov=document.getElementById('ov'); let left=[],right=[];
+  for(const [k,txt] of v.call){const p=new THREE.Vector3(...M.anchors[k]).project(cam); const x=(p.x+1)/2*W, y=(1-p.y)/2*H; (x<W/2?left:right).push({x,y,txt});}
+  const lay=(arr,side)=>{arr.sort((a,b)=>a.y-b.y); let last=120; for(const a of arr){a.ty=Math.max(a.y,last+46); last=a.ty;}
+    for(const a of arr){const tx=side==='l'?40:W-40; const anc=side==='l'?'start':'end'; const lx=side==='l'?tx+ (a.txt.length*7.6)+10 : tx-(a.txt.length*7.6)-10;
+      ov.insertAdjacentHTML('beforeend',`<polyline points="${a.x},${a.y} ${lx},${a.ty} ${side==='l'?tx:tx},${a.ty}" fill="none" stroke="#F2A900" stroke-width="2"/><circle cx="${a.x}" cy="${a.y}" r="5" fill="#F2A900"/>
+      <text x="${tx}" y="${a.ty-6}" fill="#F3F0E8" font-size="15" font-weight="700" text-anchor="${anc}">${a.txt}</text>`);}};
+  lay(left,'l'); lay(right,'r');
+}
+function place(dir){
+  const box=new THREE.Box3().setFromObject(sc), s=box.getBoundingSphere(new THREE.Sphere());
+  const d=new THREE.Vector3(...dir).normalize(); cam.up.set(0,view.startsWith('pod_')?1:0,view.startsWith('pod_')?0:1);
+  const dist=s.radius/Math.sin(THREE.MathUtils.degToRad(cam.fov/2))*(view.startsWith('pod_')?0.95:1.0);
+  cam.position.copy(s.center).addScaledVector(d,dist); cam.lookAt(s.center);
+  d1.position.copy(cam.position).add(new THREE.Vector3(-400,-200,900)); d2.position.set(800,600,300);
+  r.render(sc,cam);
+}
+window.DONE=true;
+</script></body></html>
