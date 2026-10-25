@@ -25,3 +25,9 @@ hardware/**/logs/
 hardware/suit_cad/renders/stl/
 *_freerouting.log
 __pycache__/
+
+# deck / report QA renders and intermediate builds
+presentation/avishkar/qa/
+presentation/avishkar/build/
+presentation/avishkar/report/qa/
+hardware/glb/preview/view.html
