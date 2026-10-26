@@ -434,6 +434,43 @@ PHONE = """
 """
 
 
+@app.get("/mock")
+def mock_body_page():
+    """Phone acting as a body unit, straight to this hub over Wi-Fi (no repeater needed)."""
+    return send_from_directory(BASE, "phone_body.html")
+
+
+@app.post("/api/mockbody")
+def mock_body():
+    """One packet from the phone body unit, in the same raw units a repeater forwards."""
+    d = request.get_json(force=True, silent=True) or {}
+    bid = str(d.get("node", "")).strip().upper()[:16]
+    if not bid:
+        return jsonify(ok=False, err="no body id"), 400
+
+    def iv(k, lo, hi, default=0):
+        try:
+            return max(lo, min(hi, int(d.get(k, default))))
+        except (TypeError, ValueError):
+            return default
+    p = {"node": bid, "seq": iv("seq", 0, 2**31 - 1), "bt": iv("bt", 0, 65535, 1),
+         "to": iv("to", 2000, 4500, 3650), "ta": iv("ta", 0, 6000, 3000),
+         "ax": iv("ax", -16000, 16000), "ay": iv("ay", -16000, 16000), "az": iv("az", -16000, 16000, 1000),
+         "gx": iv("gx", -20000, 20000), "gy": iv("gy", -20000, 20000), "gz": iv("gz", -20000, 20000),
+         "fl": iv("fl", 0, 0xFFFF) & ~F_TEST, "up": iv("up", 0, 10**7), "rssi": -45, "near": "PHONE", "near_rssi": -45,
+         "st": iv("st", 0, 65535), "hd": iv("hd", 0, NONE16, NONE16), "al": NONE16,
+         "hr": iv("hr", 0, 250), "sp": iv("sp", 0, 100), "path": ["PHONE"]}
+    now = time.time()
+    with lock:
+        ingest(p, "PHONE", now)
+        mine = bool(alert["level"]) and (alert["target"] == "*" or alert["target"] == bid)
+        pos = positions_view(now).get(bid)
+        return jsonify(ok=True, alert={"on": mine, "id": alert["id"], "msg": alert.get("msg", "")},
+                       evac={"on": bool(EVAC["active"]), "msg": EVAC.get("msg", "")},
+                       pos=None if not pos else {"x": pos["x"], "y": pos["y"], "walked": pos["walked"], "src": pos["src"]},
+                       worker=workers.get(bid, {}).get("name", ""))
+
+
 @app.get("/phone")
 def phone():
     return render_template_string(PHONE, scans=pending_scans, msg=request.args.get("msg"))
@@ -3439,4 +3476,15 @@ if __name__ == "__main__":
     threading.Thread(target=load_ai, daemon=True).start()
     threading.Thread(target=demo_loop, daemon=True).start()
     print("Admin hub running:  http://localhost:5000   (phone: http://<laptop-ip>:5000/phone)")
+    print("Phone body unit:    http://<laptop-ip>:5000/mock   (with motion sensors: https://<laptop-ip>:5443/mock)")
+
+    def https_server():
+        # phones only give a web page their motion sensors over https -> second port with a self-signed
+        # certificate (accept the warning once). Needs the 'cryptography' package; skipped without it.
+        try:
+            from werkzeug.serving import run_simple
+            run_simple("0.0.0.0", 5443, app, threaded=True, ssl_context="adhoc", use_reloader=False)
+        except Exception as e:
+            print("https port 5443 off (pip install cryptography):", e)
+    threading.Thread(target=https_server, daemon=True).start()
     app.run(host="0.0.0.0", port=5000, threaded=True)

@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#12171A">
+<title>MineSafe · Phone body unit</title>
+<style>
+:root{--bg:#12171A;--card:#1E262B;--card2:#263038;--line:#33414a;--ink:#F3F0E8;--mut:#9fadb5;--amber:#F2A900;--ok:#3cc47c;--warn:#f0b429;--bad:#ff4d4f;--blue:#6F96D1}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.35 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:12px 12px 28px;display:grid;gap:12px;max-width:520px;margin-inline:auto}
+header{display:flex;align-items:center;gap:10px}
+header .logo{width:34px;height:34px;border-radius:9px;background:var(--amber);color:#12171A;display:grid;place-items:center;font-weight:900;font-size:15px}
+header h1{font-size:18px;margin:0;line-height:1.1}header small{color:var(--mut);font-size:12px}
+.link{margin-left:auto;flex:none;white-space:nowrap;display:flex;align-items:center;gap:6px;font-size:12px;color:var(--mut)}
+.link i{width:10px;height:10px;border-radius:50%;background:#555}.link.ok i{background:var(--ok);box-shadow:0 0 8px var(--ok)}.link.bad i{background:var(--bad)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;display:grid;gap:10px}
+.card h2{margin:0;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--amber)}
+.row{display:flex;gap:8px;align-items:center}
+input[type=text]{flex:1;min-width:0;font:inherit;font-weight:700;letter-spacing:.04em;padding:11px;border-radius:10px;border:1px solid var(--line);background:#0d1215;color:var(--ink);text-transform:uppercase}
+button{font:inherit;font-weight:700;border:0;border-radius:11px;padding:12px;background:var(--card2);color:var(--ink);touch-action:manipulation}
+button:active{transform:scale(.97)}
+.go{background:var(--ok);color:#06210f;min-width:110px}.go.on{background:var(--bad);color:#fff}
+/* OLED-like screen */
+.oled{background:#000;border-radius:12px;border:2px solid #2a2a2a;padding:12px 14px;font-family:ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;color:#cfe8ff;display:grid;gap:6px;min-height:150px}
+.oled .top{display:flex;justify-content:space-between;font-size:12px;color:#8fb6d8}
+.oled .big{font-size:30px;font-weight:800;letter-spacing:.04em;color:#e8f6ff}
+.oled .grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;font-size:13px}
+.oled .grid b{display:block;font-size:20px;color:#fff}
+.oled.alert{background:#2a0606;border-color:var(--bad);animation:fl .5s infinite alternate}.oled.alert .big{color:#ffd0d0}
+.oled.evac{background:#2a1c00;border-color:var(--amber);animation:fl .5s infinite alternate}.oled.evac .big{color:var(--amber)}
+@keyframes fl{to{filter:brightness(1.6)}}
+.stat{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center}
+.stat div{background:var(--card2);border-radius:10px;padding:8px 4px}.stat b{display:block;font-size:22px}.stat span{font-size:11px;color:var(--mut)}
+.compass{width:64px;height:64px;border-radius:50%;border:2px solid var(--line);position:relative;flex:none;background:#0d1215}
+.compass:before{content:"N";position:absolute;top:2px;left:0;right:0;text-align:center;font-size:10px;color:var(--mut)}
+.needle{position:absolute;left:50%;top:50%;width:4px;height:26px;margin:-26px 0 0 -2px;background:linear-gradient(var(--bad),var(--bad) 60%,#fff 60%);border-radius:2px;transform-origin:50% 100%}
+.btns{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.btns button.on{background:var(--blue);color:#fff}
+label.s{display:grid;gap:4px;font-size:13px;color:var(--mut)}label.s b{color:var(--ink)}
+input[type=range]{width:100%;accent-color:var(--amber)}
+.sos{background:var(--bad);color:#fff;font-size:20px;padding:18px;position:relative;overflow:hidden}
+.sos .fill{position:absolute;inset:0;background:rgba(255,255,255,.35);transform-origin:left;transform:scaleX(0)}
+.sos span{position:relative}
+.em{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.em .on{background:var(--warn);color:#2a1d00}
+.hint{font-size:12px;color:var(--mut)}.hint a{color:var(--amber)}
+.sw{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.toggle{width:52px;height:30px;border-radius:15px;background:#3a4448;position:relative;flex:none;padding:0}
+.toggle:after{content:"";position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;background:#fff;transition:.2s}
+.toggle.on{background:var(--ok)}.toggle.on:after{left:25px}
+</style></head><body>
+
+<header>
+  <div class="logo">MS</div>
+  <div><h1>Phone body unit</h1><small>direct to the hub · 1 packet / s</small></div>
+  <div class="link" id="link"><i></i><span id="linkt">stopped</span></div>
+</header>
+
+<div class="card">
+  <div class="row">
+    <input type="text" id="bid" value="PHONE-01" maxlength="12" aria-label="Body ID">
+    <button class="go" id="go">Start</button>
+  </div>
+  <div class="hint">Register this Body ID on the admin page (Workers → Body ESP code) to see a name on the map.</div>
+</div>
+
+<div class="oled" id="oled">
+  <div class="top"><span id="o_id">PHONE-01</span><span id="o_link">HUB --</span></div>
+  <div class="big" id="o_big">READY</div>
+  <div id="o_msg" style="font-size:13px;min-height:17px"></div>
+  <div class="grid">
+    <div>TEMP<b id="o_t">--</b></div><div>HR<b id="o_hr">--</b></div><div>SpO2<b id="o_sp">--</b></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Movement → map</h2>
+  <div class="sw"><div><b>Use phone motion sensors</b><div class="hint" id="senshint">real steps, turns and falls from the accelerometer and compass</div></div><button class="toggle" id="sens" aria-label="Use phone sensors"></button></div>
+  <div class="row" style="gap:12px">
+    <div class="compass"><div class="needle" id="needle"></div></div>
+    <div class="stat" style="flex:1">
+      <div><b id="steps">0</b><span>steps</span></div><div><b id="hd">0°</b><span>heading</span></div><div><b id="walked">0 m</b><span>on map</span></div>
+    </div>
+  </div>
+  <div class="btns">
+    <button id="left">↺ Left</button><button id="walk">Walk</button><button id="right">Right ↻</button>
+  </div>
+  <div class="hint" id="possrc">Without sensors: tap Walk and turn with the buttons.</div>
+</div>
+
+<div class="card">
+  <h2>Vitals</h2>
+  <label class="s">Body temperature <b id="tv"></b><input type="range" id="t" min="35" max="41" step="0.1" value="36.6"></label>
+  <label class="s">Heart rate <b id="hrv"></b><input type="range" id="hr" min="40" max="180" step="1" value="82"></label>
+  <label class="s">SpO₂ <b id="spv"></b><input type="range" id="sp" min="80" max="100" step="1" value="98"></label>
+</div>
+
+<div class="card">
+  <h2>Emergency</h2>
+  <button class="sos" id="sos"><div class="fill" id="sosfill"></div><span id="sost">Hold 1.5 s for SOS</span></button>
+  <div class="em">
+    <button id="fall">Simulate fall</button><button id="still">Lie still</button>
+  </div>
+  <button id="ok">I'm OK — clear fall / SOS</button>
+</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const F_FALL = 1, F_NOMOTION = 2, F_IMPACT = 4, F_SOS = 8, F_ALERT_LED = 64;
+const S = { run: false, seq: 0, bt: (Math.random() * 65534 | 0) + 1, t0: Date.now(), steps: 0, heading: 0, walking: false,
+  fall: false, sos: false, still: false, sensors: false, ax: 0, ay: 0, az: 1000, gx: 0, gy: 0, gz: 0, lastStep: 0,
+  alertOn: false, alertId: 0, evac: false, hubOk: 0, fails: 0, freeFallAt: 0, lastMove: Date.now() };
+const store = { get(k) { try { return localStorage.getItem(k) } catch (e) { return null } }, set(k, v) { try { localStorage.setItem(k, v) } catch (e) {} } };
+if (store.get("ms_bid")) $("bid").value = store.get("ms_bid");
+
+const bid = () => ($("bid").value.trim().toUpperCase() || "PHONE-01").slice(0, 12);
+function vib(p) { try { navigator.vibrate && navigator.vibrate(p) } catch (e) {} }
+
+// ---------- vitals sliders
+function vit() { $("tv").textContent = (+$("t").value).toFixed(1) + " °C"; $("hrv").textContent = $("hr").value + " bpm"; $("spv").textContent = $("sp").value + " %"; draw(); }
+["t", "hr", "sp"].forEach(k => $(k).addEventListener("input", vit));
+
+// ---------- manual movement
+function turn(d) { S.heading = (S.heading + d + 360) % 360; draw(); }
+$("left").onclick = () => turn(-90); $("right").onclick = () => turn(90);
+$("walk").onclick = () => { S.walking = !S.walking; $("walk").classList.toggle("on", S.walking); $("walk").textContent = S.walking ? "Stop" : "Walk"; };
+setInterval(() => { if (S.walking && !S.sensors) { S.steps = (S.steps + 1) & 0xFFFF; S.lastMove = Date.now(); draw(); } }, 550);  // ~1.8 steps / s
+
+// ---------- phone sensors (need https on most phones)
+let gLP = 9.81, above = false;
+function onMotion(e) {
+  const a = e.accelerationIncludingGravity || {}, r = e.rotationRate || {};
+  if (a.x == null) return;
+  const g = 9.80665;
+  S.ax = Math.round(a.x / g * 1000); S.ay = Math.round(a.y / g * 1000); S.az = Math.round(a.z / g * 1000);
+  S.gx = Math.round((r.beta || 0) * 10); S.gy = Math.round((r.gamma || 0) * 10); S.gz = Math.round((r.alpha || 0) * 10);
+  const m = Math.hypot(a.x, a.y, a.z), now = Date.now();
+  gLP = gLP * 0.8 + m * 0.2;                                      // light smoothing
+  if (!above && gLP > 11.2 && now - S.lastStep > 300) { above = true; S.lastStep = now; S.steps = (S.steps + 1) & 0xFFFF; S.lastMove = now; }
+  else if (above && gLP < 9.6) above = false;
+  if (Math.abs(m - g) > 1.2) S.lastMove = now;
+  if (m < 0.4 * g) S.freeFallAt = now;                            // free fall ...
+  if (m > 3 * g && now - S.freeFallAt < 1000 && !S.fall) { S.fall = true; vib([300, 100, 300]); }   // ... then impact = fall
+}
+function onOrient(e) {
+  let h = null;
+  if (typeof e.webkitCompassHeading === "number") h = e.webkitCompassHeading;          // iOS
+  else if (e.absolute && typeof e.alpha === "number") h = (360 - e.alpha) % 360;        // Android absolute
+  else if (typeof e.alpha === "number") h = (360 - e.alpha) % 360;
+  if (h != null) S.heading = h;
+}
+async function sensorsOn() {
+  if (!window.isSecureContext) {
+    const u = `https://${location.hostname}:5443/mock`;
+    $("senshint").innerHTML = `Phones only share motion sensors over https. Open <a href="${u}">${u}</a> and accept the certificate warning once.`;
+    return false;
+  }
+  try {
+    if (typeof DeviceMotionEvent !== "undefined" && DeviceMotionEvent.requestPermission) {   // iOS 13+
+      if (await DeviceMotionEvent.requestPermission() !== "granted") throw new Error("motion permission denied");
+      if (DeviceOrientationEvent.requestPermission) await DeviceOrientationEvent.requestPermission();
+    }
+  } catch (err) { $("senshint").textContent = "Sensor permission refused: " + err.message; return false; }
+  window.addEventListener("devicemotion", onMotion);
+  window.addEventListener("deviceorientationabsolute", onOrient);
+  window.addEventListener("deviceorientation", onOrient);
+  $("senshint").textContent = "Live: walk with the phone in your hand or pocket. Drop it onto a bed to test a fall.";
+  return true;
+}
+$("sens").onclick = async () => {
+  if (S.sensors) { S.sensors = false; window.removeEventListener("devicemotion", onMotion); window.removeEventListener("deviceorientationabsolute", onOrient); window.removeEventListener("deviceorientation", onOrient); }
+  else S.sensors = await sensorsOn();
+  $("sens").classList.toggle("on", S.sensors);
+  if (S.sensors && S.walking) $("walk").click();
+};
+
+// ---------- emergency
+let sosTimer = null, sosStart = 0;
+function sosDown(e) { e.preventDefault(); sosStart = Date.now(); clearInterval(sosTimer);
+  sosTimer = setInterval(() => { const f = Math.min(1, (Date.now() - sosStart) / 1500); $("sosfill").style.transform = `scaleX(${f})`;
+    if (f >= 1) { clearInterval(sosTimer); S.sos = true; vib([500, 150, 500]); $("sost").textContent = "SOS SENT"; draw(); } }, 30); }
+function sosUp() { clearInterval(sosTimer); if (!S.sos) $("sosfill").style.transform = "scaleX(0)"; }
+$("sos").addEventListener("pointerdown", sosDown); ["pointerup", "pointerleave", "pointercancel"].forEach(ev => $("sos").addEventListener(ev, sosUp));
+$("fall").onclick = () => { S.fall = true; vib([300, 100, 300]); draw(); };
+$("still").onclick = () => { S.still = !S.still; $("still").classList.toggle("on", S.still); draw(); };
+$("ok").onclick = () => { S.fall = false; S.sos = false; S.still = false; $("still").classList.remove("on"); $("sosfill").style.transform = "scaleX(0)"; $("sost").textContent = "Hold 1.5 s for SOS"; draw(); };
+
+// ---------- screen
+function draw() {
+  $("o_id").textContent = bid();
+  $("o_t").textContent = (+$("t").value).toFixed(1); $("o_hr").textContent = $("hr").value; $("o_sp").textContent = $("sp").value;
+  $("steps").textContent = S.steps; $("hd").textContent = Math.round(S.heading) + "°";
+  $("needle").style.transform = `rotate(${S.heading}deg)`;
+  const o = $("oled"); o.classList.toggle("alert", S.alertOn && !S.evac); o.classList.toggle("evac", S.evac);
+  let big = S.run ? "SAFE" : "READY", msg = "";
+  if (S.sos) { big = "SOS SENT"; msg = "help is on the way"; }
+  else if (S.fall) { big = "FALL"; msg = "press I'm OK if you are fine"; }
+  if (S.evac) { big = "EVACUATE"; msg = S.evacMsg || "follow the exit signs"; }
+  else if (S.alertOn) { big = "ALERT"; msg = S.alertMsg || "contact the control room"; }
+  $("o_big").textContent = big; $("o_msg").textContent = msg;
+}
+
+// ---------- uplink to the hub
+async function send() {
+  if (!S.run) return;
+  const now = Date.now(), noMove = S.still || (S.sensors && now - S.lastMove > 30000);
+  let fl = 0;
+  if (S.fall) fl |= F_FALL | F_IMPACT;
+  if (noMove) fl |= F_NOMOTION;
+  if (S.sos) fl |= F_SOS;
+  if (S.alertOn) fl |= F_ALERT_LED;
+  let ax = S.ax, ay = S.ay, az = S.az, gx = S.gx, gy = S.gy, gz = S.gz;
+  if (!S.sensors) {                                   // believable values for the hub's charts
+    const ph = now / 160;
+    if (S.fall || S.still) { ax = 980; ay = 20; az = 60; gx = gy = gz = 0; }
+    else if (S.walking) { ax = Math.round(150 * Math.sin(ph)); ay = Math.round(80 * Math.cos(ph / 2)); az = Math.round(1000 + 250 * Math.abs(Math.sin(ph))); gx = Math.round(300 * Math.sin(ph)); gy = Math.round(120 * Math.cos(ph / 3)); gz = 0; }
+    else { ax = 10; ay = 15; az = 1000; gx = gy = gz = 0; }
+  }
+  S.seq++;
+  const pk = { node: bid(), seq: S.seq, bt: S.bt, to: Math.round(+$("t").value * 100), ta: 3000,
+    ax, ay, az, gx, gy, gz, fl, up: Math.round((now - S.t0) / 1000), st: S.steps, hd: Math.round(S.heading * 10) % 3600,
+    hr: +$("hr").value, sp: +$("sp").value };
+  try {
+    const ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), 2500);
+    const r = await fetch("/api/mockbody", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(pk), signal: ctl.signal });
+    clearTimeout(tm);
+    const d = await r.json();
+    S.hubOk = Date.now(); S.fails = 0;
+    const wasA = S.alertOn, wasE = S.evac;
+    S.alertOn = !!(d.alert && d.alert.on); S.alertMsg = d.alert && d.alert.msg;
+    S.evac = !!(d.evac && d.evac.on); S.evacMsg = d.evac && d.evac.msg;
+    if ((S.alertOn && !wasA) || (S.evac && !wasE)) vib([600, 200, 600, 200, 600]);
+    if (d.pos) { $("walked").textContent = d.pos.walked + " m"; $("possrc").textContent = "Map: " + d.pos.src; }
+    if (d.worker) $("o_id").textContent = bid() + " · " + d.worker;
+    link(true);
+  } catch (e) { S.fails++; link(false); }
+  draw();
+}
+function link(ok) {
+  $("link").className = "link " + (ok ? "ok" : "bad");
+  $("linkt").textContent = ok ? "hub OK" : "no hub";
+  $("o_link").textContent = ok ? "HUB OK" : "HUB --";
+}
+setInterval(send, 1000);
+
+$("go").onclick = () => {
+  S.run = !S.run; store.set("ms_bid", bid());
+  $("go").textContent = S.run ? "Stop" : "Start"; $("go").classList.toggle("on", S.run);
+  $("bid").disabled = S.run;
+  if (!S.run) { $("link").className = "link"; $("linkt").textContent = "stopped"; }
+  if (S.run) send();
+  draw();
+};
+vit();
+</script>
+</body></html>
